@@ -27,10 +27,12 @@ Prefer not to install globally? `npx coderouter-cli`.
 
 ### Studio (desktop app)
 
-**Download** the latest build from the [Releases page](https://github.com/Code-Router/CodeRouter/releases):
+**Download** the latest build directly:
 
-- **macOS (Apple Silicon):** the `.dmg` — open it and drag CodeRouter Studio to Applications.
-- **Windows:** the `.exe` installer — run it and CodeRouter Studio installs and launches.
+- **macOS (Apple Silicon):** [CodeRouter.Studio-0.1.2-arm64.dmg](https://github.com/Code-Router/CodeRouter/releases/download/studio-v0.1.2/CodeRouter.Studio-0.1.2-arm64.dmg) — open it and drag CodeRouter Studio to Applications.
+- **Windows:** [CodeRouter.Studio.Setup.0.1.2.exe](https://github.com/Code-Router/CodeRouter/releases/download/studio-v0.1.2/CodeRouter.Studio.Setup.0.1.2.exe) — run it and CodeRouter Studio installs and launches.
+
+Looking for a different version? See the [Releases page](https://github.com/Code-Router/CodeRouter/releases).
 
 > Builds aren't code‑signed yet. On macOS, right‑click the app → **Open** and confirm. On Windows, if SmartScreen appears, click **More info → Run anyway**. The app is fully self‑contained — no separate Node or CLI install required.
 

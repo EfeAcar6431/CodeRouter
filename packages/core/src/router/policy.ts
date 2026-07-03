@@ -222,9 +222,14 @@ export function pick(
   const cheap = pickByHint('cheap', ctx, requireEditable);
   if (cheap && editableOk(cheap)) return { ...cheap, rationale: `policy:${policy.name} (fallback: cheap)` };
 
-  // 7) Last resort: the first ready provider in the registry.
+  // 7) Last resort: the first ready provider in the registry. When the
+  //    caller demanded an editable provider, skip chat-only adapters here
+  //    too - otherwise this fallback could hand back exactly the chat-only
+  //    sibling (e.g. OpenRouter's `openai_compat`) that requireEditable was
+  //    meant to exclude, which then trips agent mode's canEdit guard.
   for (const p of ctx.registry.list()) {
     if (!ctx.registry.isReady(p.name)) continue;
+    if (requireEditable && !EDITABLE_ADAPTERS.has(p.adapter)) continue;
     const model = Object.keys(p.models)[0];
     if (!model) continue;
     return {

@@ -105,9 +105,14 @@ export async function runAgentMode(input: ModeInput, ctx: ModeContext): Promise<
   const images = [...detectedImages, ...(input.images ?? [])];
   const requiresVision = images.length > 0;
 
+  // Agent mode rewrites files, so every route it picks MUST be backed by a
+  // tools-capable (editable) adapter. `requireEditable` filters the candidate
+  // pool up front so the router can't hand back a chat-only sibling (e.g.
+  // OpenRouter's `openai_compat` provider) that would trip the canEdit guard
+  // below and abort the run. An explicit `--route` override is honored as-is.
   let route = input.route
     ? parseRoute(input.route)
-    : pick(classification, ctx.router, { effort, requiresVision, prompt: input.prompt });
+    : pick(classification, ctx.router, { effort, requiresVision, requireEditable: true, prompt: input.prompt });
 
   // If vision was required but no vision model is available, the router
   // hands back a `no-vision-model` sentinel (provider 'none'). Warn,
@@ -121,7 +126,9 @@ export async function runAgentMode(input: ModeInput, ctx: ModeContext): Promise<
       data: { warning: 'no vision-capable model is enabled; running text-only — enable one in /setup' },
     });
     images.length = 0; // clear so we don't try to attach
-    route = input.route ? parseRoute(input.route) : pick(classification, ctx.router, { effort, prompt: input.prompt });
+    route = input.route
+      ? parseRoute(input.route)
+      : pick(classification, ctx.router, { effort, requireEditable: true, prompt: input.prompt });
   }
 
   const adapter: Adapter = ctx.resolveAdapter

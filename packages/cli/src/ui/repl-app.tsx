@@ -1981,6 +1981,18 @@ function App({ cwd, initialMode }: AppProps): React.ReactElement {
         void resolvePlanApprove(planApproveChoice);
         return;
       }
+      // Any other printable keystroke means the user would rather type a
+      // follow-up than pick from the list (e.g. "tweak phase 2 to ..." or
+      // "go ahead and build it"). Dismiss the panel and seed the input so
+      // no keystroke is lost; the text then lands as a normal prompt in the
+      // current mode, refining the plan in place.
+      if (char && !key.ctrl && !key.meta && !key.tab && !key.escape) {
+        setPlanApprove(null);
+        setWizardStep('idle');
+        setInput((prev) => prev + char);
+        setCursor((c) => c + char.length);
+        return;
+      }
       return;
     }
 
@@ -2681,7 +2693,7 @@ function PlanApprovePanel({
         })}
       </Box>
       <Box marginTop={1}>
-        <Text color="gray">↑ ↓ to choose · 1-5 shortcuts · enter to confirm · esc to dismiss</Text>
+        <Text color="gray">↑ ↓ to choose · 1-5 shortcuts · enter to confirm · type to refine · esc to dismiss</Text>
       </Box>
     </Box>
   );

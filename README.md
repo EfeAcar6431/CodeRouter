@@ -10,9 +10,22 @@ Works with your existing **Claude Code** or **Codex** CLI, or any API key — Op
 
 Use it two ways: the **CLI** (`coderouter`) for the terminal, or **CodeRouter Studio**, a desktop app for everything else.
 
-## CodeRouter Studio (desktop app)
+## Install
 
-CodeRouter Studio is a native desktop app that wraps the same router in a full UI — your projects, chats, loops, usage, and plugins in one place. It runs a persistent local daemon so background work (like loops) keeps going after you close the window.
+### CLI
+
+Requires **Node 24+**.
+
+```bash
+npm install -g coderouter-cli
+coderouter
+```
+
+First launch walks you through adding an API key (or auto-detects a Claude Code / Codex CLI you already have). No other setup, no extra services.
+
+Prefer not to install globally? `npx coderouter-cli`.
+
+### Studio (desktop app)
 
 **Download** the latest build from the [Releases page](https://github.com/Code-Router/CodeRouter/releases):
 
@@ -20,6 +33,23 @@ CodeRouter Studio is a native desktop app that wraps the same router in a full U
 - **Windows:** the `.exe` installer — run it and CodeRouter Studio installs and launches.
 
 > Builds aren't code‑signed yet. On macOS, right‑click the app → **Open** and confirm. On Windows, if SmartScreen appears, click **More info → Run anyway**. The app is fully self‑contained — no separate Node or CLI install required.
+
+## Quick start
+
+```bash
+coderouter                         # interactive REPL
+coderouter agent "rename getCwd"   # one-shot execution
+coderouter masterplan "design an L1-L5 memory system"
+coderouter debug  "tests fail in CI but pass locally"
+coderouter review                  # review the current diff
+coderouter route "fix typo"        # show the chosen route (no run)
+```
+
+In the REPL, type `/` for commands and `@` to reference files.
+
+## CodeRouter Studio (desktop app)
+
+CodeRouter Studio is a native desktop app that wraps the same router in a full UI — your projects, chats, loops, usage, and plugins in one place. It runs a persistent local daemon so background work (like loops) keeps going after you close the window.
 
 What's inside:
 
@@ -40,32 +70,6 @@ pnpm --filter @coderouter/app package   # build a distributable (.dmg / AppImage
 ```
 
 `package` builds the renderer + Electron main, bundles the daemon into the app (so it's self‑contained), and emits an installer under `packages/app/release/`.
-
-## Install (CLI)
-
-Requires **Node 24+**.
-
-```bash
-npm install -g coderouter-cli
-coderouter
-```
-
-First launch walks you through adding an API key (or auto-detects a Claude Code / Codex CLI you already have). No other setup, no extra services.
-
-Prefer not to install globally? `npx coderouter-cli`.
-
-## Quick start
-
-```bash
-coderouter                         # interactive REPL
-coderouter agent "rename getCwd"   # one-shot execution
-coderouter masterplan "design an L1-L5 memory system"
-coderouter debug  "tests fail in CI but pass locally"
-coderouter review                  # review the current diff
-coderouter route "fix typo"        # show the chosen route (no run)
-```
-
-In the REPL, type `/` for commands and `@` to reference files.
 
 ## Why it pays off
 

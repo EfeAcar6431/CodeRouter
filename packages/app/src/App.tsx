@@ -13,15 +13,16 @@ import {
   type LucideIcon,
   Monitor,
   Moon,
-  PanelBottom,
   PanelLeft,
   PanelRight,
   RefreshCw,
   Settings as SettingsIcon,
   Sparkles,
   SquarePen,
+  SquareTerminal,
   Sun,
   Trash2,
+  X,
 } from 'lucide-react';
 import { api, execCommand, isMac, type ChatSummary, type ProjectSummary } from './lib/api';
 import { LoopEventsProvider, useDaemonConnected, usePlanOpen } from './lib/events';
@@ -77,11 +78,11 @@ function Shell(): React.ReactElement {
   });
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [sidePanelOpen, setSidePanelOpen] = useState(false);
-  const [bottomPanelOpen, setBottomPanelOpen] = useState(false);
-  const [filesOpen, setFilesOpen] = useState(false);
-  // In-app browser preview: opens automatically when the agent starts a
-  // dev server whose URL we detect.
-  const [previewOpen, setPreviewOpen] = useState(false);
+  // Right dock: a single panel on the right with a tab switcher for the
+  // browser preview, a real terminal, and the file explorer. `null` = closed.
+  const [rightTab, setRightTab] = useState<RightTab | null>(null);
+  // In-app browser preview URL; opens automatically (on the Browser tab) when
+  // the agent starts a dev server whose URL we detect.
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [insertText, setInsertText] = useState<{ text: string; nonce: number } | null>(null);
   const [changes, setChanges] = useState<ChatChanges | null>(null);
@@ -125,12 +126,16 @@ function Shell(): React.ReactElement {
       });
   }, []);
 
-  // ⌘J / Ctrl+J toggles the bottom terminal panel, matching Codex.
+  // Toggle a right-dock tab: clicking the active tab's control closes the
+  // dock, otherwise it opens/switches to that tab.
+  const toggleRightTab = (t: RightTab): void => setRightTab((cur) => (cur === t ? null : t));
+
+  // ⌘J / Ctrl+J toggles the terminal (now a tab in the right dock), matching Codex.
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'j') {
         e.preventDefault();
-        setBottomPanelOpen((o) => !o);
+        setRightTab((cur) => (cur === 'terminal' ? null : 'terminal'));
       }
     };
     window.addEventListener('keydown', onKey);
@@ -271,7 +276,7 @@ function Shell(): React.ReactElement {
   // URL we detected. Only steal focus the first time / when the URL changes.
   const showServerUrl = (url: string): void => {
     setPreviewUrl(url);
-    setPreviewOpen(true);
+    setRightTab('browser');
   };
 
   const activeName = allProjects.find((p) => p.cwd === project)?.name;
@@ -417,18 +422,13 @@ function Shell(): React.ReactElement {
             {(nav === 'loops' || nav === 'chat') && activeName && (
               <span className="mr-1 max-w-[180px] truncate text-xs text-muted">{activeName}</span>
             )}
-            <PanelToggle icon={FolderTree} active={filesOpen} onClick={() => setFilesOpen((o) => !o)} title="Toggle file explorer" />
-            <PanelToggle icon={Globe} active={previewOpen} onClick={() => setPreviewOpen((o) => !o)} title="Toggle browser preview" />
+            <PanelToggle icon={Globe} active={rightTab === 'browser'} onClick={() => toggleRightTab('browser')} title="Browser preview" />
+            <PanelToggle icon={SquareTerminal} active={rightTab === 'terminal'} onClick={() => toggleRightTab('terminal')} title="Terminal (⌘J)" />
+            <PanelToggle icon={FolderTree} active={rightTab === 'files'} onClick={() => toggleRightTab('files')} title="File explorer" />
             <PanelToggle icon={PanelRight} active={sidePanelOpen} onClick={() => setSidePanelOpen((o) => !o)} title="Toggle changes panel" />
-            <PanelToggle icon={PanelBottom} active={bottomPanelOpen} onClick={() => setBottomPanelOpen((o) => !o)} title="Toggle terminal (⌘J)" />
           </div>
         </header>
         <div className="flex min-h-0 flex-1">
-          {filesOpen && (
-            <aside className="w-64 shrink-0 border-r border-border bg-panel">
-              <FileTree project={project} onMention={mentionFile} onOpenFile={openFileInEditor} />
-            </aside>
-          )}
           <div className={cls('min-h-0 flex-1', nav === 'chat' || nav === 'plans' ? 'overflow-hidden' : 'overflow-y-auto')}>
             {nav === 'chat' ? (
               <ChatPage
@@ -472,9 +472,18 @@ function Shell(): React.ReactElement {
               </div>
             )}
           </div>
-          {previewOpen && (
-            <aside className="w-[34rem] max-w-[50vw] shrink-0 border-l border-border bg-panel">
-              <Preview url={previewUrl} isElectron={Boolean(window.coderouter?.isElectron)} onClose={() => setPreviewOpen(false)} />
+          {rightTab && (
+            <aside className="w-[34rem] max-w-[55vw] min-w-[22rem] shrink-0 border-l border-border bg-panel">
+              <RightDock
+                tab={rightTab}
+                onTab={setRightTab}
+                onClose={() => setRightTab(null)}
+                project={project}
+                previewUrl={previewUrl}
+                isElectron={Boolean(window.coderouter?.isElectron)}
+                onMention={mentionFile}
+                onOpenFile={openFileInEditor}
+              />
             </aside>
           )}
           {sidePanelOpen && (
@@ -483,12 +492,94 @@ function Shell(): React.ReactElement {
             </aside>
           )}
         </div>
-        {bottomPanelOpen && (
-          <div className="h-64 shrink-0 border-t border-border">
-            <Terminal project={project} onClose={() => setBottomPanelOpen(false)} />
+      </main>
+    </div>
+  );
+}
+
+type RightTab = 'browser' | 'terminal' | 'files';
+
+const DOCK_TABS: { id: RightTab; label: string; icon: LucideIcon }[] = [
+  { id: 'browser', label: 'Browser', icon: Globe },
+  { id: 'terminal', label: 'Terminal', icon: SquareTerminal },
+  { id: 'files', label: 'Files', icon: FolderTree },
+];
+
+/**
+ * Unified right-side dock with a tab switcher for the browser preview, a
+ * real terminal, and the file explorer. Visited tabs stay mounted (hidden
+ * when inactive) so switching tabs never tears down a live PTY session or
+ * reloads the preview webview — only closing the whole dock does.
+ */
+function RightDock({
+  tab,
+  onTab,
+  onClose,
+  project,
+  previewUrl,
+  isElectron,
+  onMention,
+  onOpenFile,
+}: {
+  tab: RightTab;
+  onTab: (t: RightTab) => void;
+  onClose: () => void;
+  project: string | null;
+  previewUrl: string | null;
+  isElectron: boolean;
+  onMention: (relPath: string) => void;
+  onOpenFile: (relPath: string) => void;
+}): React.ReactElement {
+  const [visited, setVisited] = useState<Set<RightTab>>(() => new Set<RightTab>([tab]));
+  useEffect(() => {
+    setVisited((v) => (v.has(tab) ? v : new Set(v).add(tab)));
+  }, [tab]);
+
+  return (
+    <div className="flex h-full flex-col bg-panel">
+      <div className="flex h-10 shrink-0 items-center gap-1 border-b border-border px-2">
+        {DOCK_TABS.map((t) => {
+          const Icon = t.icon;
+          const active = t.id === tab;
+          return (
+            <button
+              key={t.id}
+              onClick={() => onTab(t.id)}
+              className={cls(
+                'flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium transition-colors',
+                active ? 'bg-accent/20 text-accent' : 'text-muted hover:bg-panel2 hover:text-text',
+              )}
+            >
+              <Icon className="h-3.5 w-3.5 shrink-0" strokeWidth={2} />
+              {t.label}
+            </button>
+          );
+        })}
+        <button
+          onClick={onClose}
+          title="Close panel"
+          className="ml-auto flex h-7 w-7 items-center justify-center rounded-md text-muted transition-colors hover:bg-panel2 hover:text-text"
+        >
+          <X className="h-4 w-4" strokeWidth={2} />
+        </button>
+      </div>
+      <div className="min-h-0 flex-1">
+        {visited.has('browser') && (
+          <div className={cls('h-full', tab === 'browser' ? 'block' : 'hidden')}>
+            <Preview url={previewUrl} isElectron={isElectron} />
           </div>
         )}
-      </main>
+        {visited.has('terminal') && (
+          <div className={cls('h-full', tab === 'terminal' ? 'block' : 'hidden')}>
+            <Terminal project={project} />
+          </div>
+        )}
+        {visited.has('files') && (
+          <div className={cls('h-full', tab === 'files' ? 'block' : 'hidden')}>
+            <FileTree project={project} onMention={onMention} onOpenFile={onOpenFile} />
+          </div>
+        )}
+      </div>
     </div>
   );
 }

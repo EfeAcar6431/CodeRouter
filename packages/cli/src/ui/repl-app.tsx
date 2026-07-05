@@ -14,9 +14,13 @@ import {
   agent,
   ConversationHistory,
   detectPromptImages,
+  graphifyPreset,
+  listMcpServers,
+  probeMcpServer,
   renderReportFooterText,
   renderReportText,
   sandbox,
+  saveMcpServer,
   scanForInjection,
   summarizeInjectionScan,
 } from '@coderouter/core';
@@ -91,6 +95,7 @@ const COMMANDS: CommandDef[] = [
   { name: 'scan', hint: '<text>', desc: 'check text for prompt-injection markers' },
   { name: 'security', hint: 'warn|block', desc: 'set prompt-injection policy' },
   { name: 'models', hint: '[search]', desc: 'browse OpenRouter tool-capable models' },
+  { name: 'mcp', hint: '[list|add-graphify]', desc: 'manage external MCP servers (e.g. graphify)' },
   { name: 'dashboard', hint: '', desc: 'open the usage + settings dashboard' },
   { name: 'loop', hint: '<goal>', desc: 'build + run a verified AI loop for a goal' },
   { name: 'app', hint: '', desc: 'launch CodeRouter Studio (desktop app)' },
@@ -1527,6 +1532,36 @@ function App({ cwd, initialMode }: AppProps): React.ReactElement {
       case 'route':
         pushSystem('  use `coderouter route <prompt>` from your shell');
         return;
+      case 'mcp': {
+        const sub = arg.trim().split(/\s+/)[0] || 'list';
+        if (sub === 'add-graphify') {
+          const cfg = graphifyPreset();
+          pushSystem('  probing graphify --mcp…', 'info');
+          const probe = await probeMcpServer({ ...cfg, cwd });
+          saveMcpServer(cwd, cfg, 'project');
+          if (probe.ok) {
+            pushSystem(
+              `  graphify connected — ${probe.tools?.length ?? 0} tool(s): ${(probe.tools ?? []).join(', ')}. saved to this project.`,
+              'success',
+            );
+          } else {
+            pushSystem(
+              `  graphify not reachable (${probe.error}). saved anyway; install it (pip install graphifyy) and run \`graphify .\`, then it connects on the next run.`,
+              'warn',
+            );
+          }
+          return;
+        }
+        // default: list configured servers
+        const servers = [...listMcpServers(cwd, 'project'), ...listMcpServers(cwd, 'global')];
+        if (servers.length === 0) {
+          pushSystem('  no MCP servers configured. add graphify with `/mcp add-graphify` (or `coderouter mcp add …`).', 'info');
+          return;
+        }
+        const lines = servers.map((s) => `    • ${s.name}  ${[s.command, ...(s.args ?? [])].join(' ')}${s.enabled === false ? ' [disabled]' : ''}`);
+        pushSystem(`  MCP servers (exposed to the agent loop):\n${lines.join('\n')}`, 'info');
+        return;
+      }
       case 'scan': {
         if (!arg) {
           pushSystem(

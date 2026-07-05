@@ -9,6 +9,7 @@ import { runDashboardCommand } from './commands/dashboard.js';
 import { runDaemonCommand } from './commands/daemon.js';
 import { runLoopCommand } from './commands/loop.js';
 import { runAppCommand } from './commands/app.js';
+import { runMcpCommand } from './commands/mcp.js';
 import { loadCredentialsIntoEnv } from './ui/setup.js';
 import { BRAND_NAME } from './branding/index.js';
 import { CLI_VERSION } from './version.js';
@@ -134,6 +135,15 @@ export async function runCli(argv: string[]): Promise<void> {
     .option('-c, --cwd <path>', 'working directory', process.cwd())
     .action(async (opts: { cwd?: string }) => {
       await runAppCommand({ cwd: opts.cwd ?? process.cwd() });
+    });
+
+  program
+    .command('mcp <action> [args...]')
+    .description('manage external MCP servers the agent connects to: list | add | remove | add-graphify | test')
+    .option('-c, --cwd <path>', 'working directory', process.cwd())
+    .option('-g, --global', 'apply to the global (~/.coderouter) config instead of this project', false)
+    .action(async (action: string, args: string[], opts: { cwd?: string; global?: boolean }) => {
+      await runMcpCommand({ action, args: args ?? [], cwd: opts.cwd ?? process.cwd(), global: opts.global });
     });
 
   program

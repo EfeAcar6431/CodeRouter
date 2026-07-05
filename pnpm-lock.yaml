@@ -164,6 +164,9 @@ importers:
 
   packages/core:
     dependencies:
+      '@modelcontextprotocol/sdk':
+        specifier: ^1.29.0
+        version: 1.29.0(zod@3.25.76)
       '@vscode/ripgrep':
         specifier: ^1.18.0
         version: 1.18.0

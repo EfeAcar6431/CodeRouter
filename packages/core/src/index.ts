@@ -127,6 +127,19 @@ export {
   applyPreset,
 } from './loops/index.js';
 export { coderouterHome } from './paths.js';
+export {
+  loadMcpServers,
+  listMcpServers,
+  saveMcpServer,
+  removeMcpServer,
+  graphifyPreset,
+  projectMcpPath,
+  globalMcpPath,
+  getMcpToolsForCwd,
+  disposeAllMcp,
+  probeMcpServer,
+} from './mcp/index.js';
+export type { McpServerConfig, McpFile, McpToolInfo } from './mcp/index.js';
 export { detectClarifications } from './clarify/index.js';
 export {
   openStore,

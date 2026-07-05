@@ -20,6 +20,7 @@ import {
   type Tool,
 } from '../agent/index.js';
 import { buildSystemPrompt } from '../agent/systemPrompt.js';
+import { getMcpToolsForCwd } from '../mcp/index.js';
 import type { AdapterCapabilities, ContextManifest, ProviderId } from '../types.js';
 import { BaseAdapter } from './base.js';
 import type { AdapterCallInput, AdapterCallResult } from './types.js';
@@ -110,12 +111,23 @@ export class CodeRouterAgentAdapter extends BaseAdapter {
       append: formatManifestForPrompt(input.contextManifest),
     });
 
+    // Fold in tools from any configured external MCP servers (e.g. graphify's
+    // knowledge-graph tools). Best-effort: a server that's down or misconfigured
+    // is skipped so it can never block or fail an otherwise-valid run.
+    let tools = this.tools;
+    try {
+      const mcpTools = await getMcpToolsForCwd(input.cwd);
+      if (mcpTools.length > 0) tools = [...this.tools, ...mcpTools];
+    } catch {
+      /* MCP is additive; ignore discovery failures */
+    }
+
     const result = await runAgent({
       prompt: input.prompt,
       systemPrompt,
       cwd: input.cwd,
       signal: input.signal,
-      tools: this.tools,
+      tools,
       transport,
       priorMessages: input.priorMessages,
       images: input.images,

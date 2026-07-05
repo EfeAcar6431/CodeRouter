@@ -23,6 +23,7 @@ export default defineConfig({
     'src/workflows/index.ts',
     'src/agent/index.ts',
     'src/catalog/index.ts',
+    'src/mcp/index.ts',
   ],
   format: ['esm'],
   dts: true,

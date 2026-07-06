@@ -53,6 +53,7 @@ describe('default tool registry', () => {
       'grep',
       'list_dir',
       'web_search',
+      'web_fetch',
       'write_file',
       'edit_file',
       'multi_edit',

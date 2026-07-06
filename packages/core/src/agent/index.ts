@@ -34,6 +34,7 @@ export {
   grepTool,
   bashTool,
   openPreviewTool,
+  webFetchTool,
   listDirTool,
   askUserQuestionTool,
 } from './tools/index.js';

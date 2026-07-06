@@ -1,5 +1,5 @@
-import { fastClassification } from '../router/fast.js';
-import { pick, pickStrong } from '../router/policy.js';
+import { fastClassification } from '../routing/fast.js';
+import { pick, pickStrong } from '../routing/policy.js';
 import type { RouteRef } from '../types.js';
 import { type LoopRunContext, resolveLoopAdapter } from './context.js';
 import { discoverVerifiers, type DiscoveredVerifiers } from './discover.js';

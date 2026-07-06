@@ -53,13 +53,23 @@ describe('estimateDifficulty', () => {
   });
 
   it('low confidence raises the score', () => {
-    const sure = estimateDifficulty(classification({ taskType: 'feature', confidence: 0.95 }), 'medium');
-    const unsure = estimateDifficulty(classification({ taskType: 'feature', confidence: 0.2 }), 'medium');
+    const sure = estimateDifficulty(
+      classification({ taskType: 'feature', confidence: 0.95 }),
+      'medium',
+    );
+    const unsure = estimateDifficulty(
+      classification({ taskType: 'feature', confidence: 0.2 }),
+      'medium',
+    );
     expect(unsure.score).toBeGreaterThan(sure.score);
   });
 
   it('prompt features (stack trace + hard keywords) raise the score', () => {
-    const plain = estimateDifficulty(classification({ taskType: 'bugfix' }), 'medium', 'fix the button');
+    const plain = estimateDifficulty(
+      classification({ taskType: 'bugfix' }),
+      'medium',
+      'fix the button',
+    );
     const gnarly = estimateDifficulty(
       classification({ taskType: 'bugfix' }),
       'medium',

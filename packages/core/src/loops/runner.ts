@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
-import { fastClassification } from '../router/fast.js';
-import { pick, pickStrong } from '../router/policy.js';
+import { fastClassification } from '../routing/fast.js';
+import { pick, pickStrong } from '../routing/policy.js';
 import {
   changedFiles,
   createWorktree,

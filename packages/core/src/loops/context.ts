@@ -1,6 +1,6 @@
 import type { Adapter } from '../adapters/types.js';
 import type { ProviderRegistry } from '../providers/registry.js';
-import type { RouterContext } from '../router/policy.js';
+import type { RouterContext } from '../routing/policy.js';
 import type { RouteRef } from '../types.js';
 
 /**

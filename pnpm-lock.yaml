@@ -32,9 +32,6 @@ importers:
       '@coderouter/core':
         specifier: workspace:*
         version: link:../packages/core
-      yaml:
-        specifier: ^2.6.1
-        version: 2.9.0
     devDependencies:
       '@types/node':
         specifier: ^22.10.5

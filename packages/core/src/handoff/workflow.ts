@@ -1,6 +1,6 @@
 import type { Adapter } from '../adapters/types.js';
 import type { ProviderRegistry } from '../providers/registry.js';
-import { pick, type RouterContext } from '../router/policy.js';
+import { pick, type RouterContext } from '../routing/policy.js';
 import type { Worktree } from '../sandbox/worktree.js';
 import { diffWorktree } from '../sandbox/worktree.js';
 import { runValidators, summarize, type ValidatorSpec } from '../validate/run.js';

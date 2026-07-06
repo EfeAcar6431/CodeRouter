@@ -4,10 +4,11 @@ import { ClassifierCascade, loadSeedCorpus } from '../classify/index.js';
 import { composeDirectives } from '../customize/index.js';
 import { scanContext } from '../context/scan.js';
 import { detectPromptImages } from '../context/images.js';
-import { fastClassification } from '../router/fast.js';
-import { matchInstant } from '../router/instant.js';
-import { pick } from '../router/policy.js';
-import { effortProfile } from '../router/effort.js';
+import { fastClassification } from '../routing/fast.js';
+import { matchInstant } from '../routing/instant.js';
+import { pick } from '../routing/policy.js';
+import { effortProfile } from '../routing/effort.js';
+import { classificationToSubtask, shadowRoute } from '../routing/shadow.js';
 import { runHandoff } from '../handoff/workflow.js';
 import {
   changedFiles,
@@ -149,6 +150,20 @@ export async function runAgentMode(input: ModeInput, ctx: ModeContext): Promise<
       `agent mode requires a tools-capable provider, but the router picked '${route.provider}:${route.model}' which is chat-only. ` +
         `Configure a coding-agent provider via /setup (Claude Code or Codex on PATH, or any OpenRouter / OpenAI / etc. key - those route through the CodeRouter agent loop), or pick a tools-capable model directly with --route.`,
     );
+  }
+
+  // Shadow the new four-layer router alongside the live `pick` decision.
+  // Best-effort and fire-and-forget: it logs a `routeSubtask` decision for the
+  // eval/replay harness but never affects which adapter actually runs here.
+  if (ctx.store && !input.dryRun) {
+    const subtask = classificationToSubtask({
+      subtaskId: runId,
+      prompt: input.prompt,
+      classification,
+      effort,
+      repoId: input.cwd,
+    });
+    void shadowRoute(ctx.store.routing, subtask);
   }
 
   progress({ phase: 'agent/worktree', stage: 'start' });

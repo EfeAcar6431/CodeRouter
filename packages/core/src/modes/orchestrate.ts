@@ -7,9 +7,9 @@ import { EDITABLE_ADAPTERS } from '../catalog/resolve.js';
 import { ClassifierCascade, loadSeedCorpus } from '../classify/index.js';
 import { composeDirectives, loadSubagents, matchSubagent, type Subagent } from '../customize/index.js';
 import { runHandoff } from '../handoff/workflow.js';
-import { effortProfile } from '../router/effort.js';
-import { fastClassification } from '../router/fast.js';
-import { pick, pickStrong } from '../router/policy.js';
+import { effortProfile } from '../routing/effort.js';
+import { fastClassification } from '../routing/fast.js';
+import { pick, pickStrong } from '../routing/policy.js';
 import {
   changedFiles,
   commitWorktreeState,

@@ -1,7 +1,7 @@
 // Namespaced re-exports for callers that want module separation.
 export * as adapters from './adapters/index.js';
 export * as classify from './classify/index.js';
-export * as router from './router/index.js';
+export * as router from './routing/index.js';
 export * as sandbox from './sandbox/index.js';
 export * as validate from './validate/index.js';
 export * as modes from './modes/index.js';
@@ -47,12 +47,12 @@ export {
   loadSeedCorpus,
   buildMergedIndex,
 } from './classify/index.js';
-export { matchInstant } from './router/instant.js';
-export { pick, pickStrong } from './router/policy.js';
-export type { RouterContext, MemoryBias, PickOptions } from './router/policy.js';
-export { fastClassification } from './router/fast.js';
-export { effortProfile } from './router/effort.js';
-export { deriveMemoryBias } from './router/bias.js';
+export { matchInstant } from './routing/instant.js';
+export { pick, pickStrong } from './routing/policy.js';
+export type { RouterContext, MemoryBias, PickOptions } from './routing/policy.js';
+export { fastClassification } from './routing/fast.js';
+export { effortProfile } from './routing/effort.js';
+export { deriveMemoryBias } from './routing/bias.js';
 export { ProviderRegistry, defaultProviders } from './providers/index.js';
 export { whichSync } from './sandbox/which.js';
 export { resolveIntent, explainIntent, lookupModel, CATALOG } from './catalog/index.js';
@@ -90,7 +90,7 @@ export type {
   Difficulty,
   DifficultyBand,
 } from './models/index.js';
-export { estimateDifficulty } from './router/difficulty.js';
+export { estimateDifficulty } from './routing/difficulty.js';
 export { runValidators, summarize, detectProject } from './validate/index.js';
 export { scanContext } from './context/index.js';
 export { loadProjectMemory, projectMemoryToSystemPrompt } from './memory/index.js';

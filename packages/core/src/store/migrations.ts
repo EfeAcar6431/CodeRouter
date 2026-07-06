@@ -180,6 +180,78 @@ export const MIGRATIONS: Migration[] = [
       `);
     },
   },
+  {
+    version: 3,
+    description: 'routing audit trail (routing_requests, routing_decisions, model_invocations, execution_outcomes)',
+    apply(db) {
+      db.exec(`
+        CREATE TABLE routing_requests (
+          id TEXT PRIMARY KEY,
+          subtask_id TEXT NOT NULL,
+          parent_task_id TEXT,
+          repo_id TEXT,
+          task_kind TEXT NOT NULL,
+          language TEXT,
+          risk_tier TEXT NOT NULL,
+          prompt_tokens_est INTEGER NOT NULL DEFAULT 0,
+          features_json TEXT NOT NULL DEFAULT '{}',
+          created_at INTEGER NOT NULL
+        );
+        CREATE INDEX idx_routing_requests_created ON routing_requests(created_at);
+        CREATE INDEX idx_routing_requests_kind ON routing_requests(task_kind);
+
+        CREATE TABLE routing_decisions (
+          id TEXT PRIMARY KEY,
+          request_id TEXT NOT NULL,
+          strategy TEXT NOT NULL,
+          primary_model TEXT,
+          verifier_model TEXT,
+          fallback_models_json TEXT NOT NULL DEFAULT '[]',
+          reason_codes_json TEXT NOT NULL DEFAULT '[]',
+          rejected_json TEXT NOT NULL DEFAULT '[]',
+          scores_json TEXT NOT NULL DEFAULT '[]',
+          estimated_cost_usd REAL,
+          estimated_latency_ms INTEGER,
+          logged_propensity REAL NOT NULL DEFAULT 1,
+          exploration_probability REAL NOT NULL DEFAULT 0,
+          created_at INTEGER NOT NULL
+        );
+        CREATE INDEX idx_routing_decisions_request ON routing_decisions(request_id);
+
+        CREATE TABLE model_invocations (
+          id TEXT PRIMARY KEY,
+          decision_id TEXT NOT NULL,
+          model_id TEXT NOT NULL,
+          via TEXT,
+          provider TEXT,
+          role TEXT NOT NULL DEFAULT 'primary',
+          status TEXT NOT NULL,
+          tokens_in INTEGER NOT NULL DEFAULT 0,
+          tokens_out INTEGER NOT NULL DEFAULT 0,
+          cost_usd REAL NOT NULL DEFAULT 0,
+          ttft_ms INTEGER,
+          latency_ms INTEGER NOT NULL DEFAULT 0,
+          schema_valid INTEGER,
+          error TEXT,
+          created_at INTEGER NOT NULL
+        );
+        CREATE INDEX idx_model_invocations_decision ON model_invocations(decision_id);
+
+        CREATE TABLE execution_outcomes (
+          id TEXT PRIMARY KEY,
+          decision_id TEXT NOT NULL,
+          test_pass INTEGER,
+          verifier_pass INTEGER,
+          patch_applied INTEGER,
+          accepted INTEGER,
+          rolled_back INTEGER,
+          notes TEXT,
+          created_at INTEGER NOT NULL
+        );
+        CREATE INDEX idx_execution_outcomes_decision ON execution_outcomes(decision_id);
+      `);
+    },
+  },
 ];
 
 export function migrate(db: Database): { from: number; to: number } {

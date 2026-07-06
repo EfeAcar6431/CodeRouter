@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { defaultProviders, ProviderRegistry } from '../providers/registry.js';
+import { ProviderRegistry, defaultProviders } from '../providers/registry.js';
 import type { Classification } from '../types.js';
 import { effortProfile } from './effort.js';
 import { matchInstant } from './instant.js';
@@ -191,7 +191,9 @@ describe('pick()', () => {
         },
       }),
       ctx,
-      { prompt: 'redesign the distributed scheduler to fix a race condition / deadlock under load' },
+      {
+        prompt: 'redesign the distributed scheduler to fix a race condition / deadlock under load',
+      },
     );
     // No single shape forces frontier, but the combined difficulty does.
     expect(r.rationale).toMatch(/frontier|difficulty=frontier/);
@@ -335,9 +337,7 @@ describe('pick()', () => {
     const ctx = {
       registry: new ProviderRegistry(defaultProviders()),
       memoryBias: {
-        preferredRoutes: [
-          { route: 'claude_code,sonnet', reason: '100% success across 4 runs' },
-        ],
+        preferredRoutes: [{ route: 'claude_code,sonnet', reason: '100% success across 4 runs' }],
       },
     };
     const r = pick(classification({ taskType: 'feature' }), ctx);
@@ -378,11 +378,7 @@ describe('pick with requiresVision', () => {
   it('returns a vision-capable model when requiresVision is set', () => {
     envSetup();
     const ctx = { registry: new ProviderRegistry(defaultProviders()) };
-    const route = pick(
-      classification({ taskType: 'feature' }),
-      ctx,
-      { requiresVision: true },
-    );
+    const route = pick(classification({ taskType: 'feature' }), ctx, { requiresVision: true });
     // Should pick a model that has visionInput in the static catalog
     // (openai, anthropic, or google all have it)
     expect(route.model).not.toBe('no-vision-model');
@@ -399,11 +395,7 @@ describe('pick with requiresVision', () => {
     delete process.env.OPENROUTER_API_KEY;
     process.env.PATH = '';
     const ctx = { registry: new ProviderRegistry(defaultProviders()) };
-    const route = pick(
-      classification({ taskType: 'feature' }),
-      ctx,
-      { requiresVision: true },
-    );
+    const route = pick(classification({ taskType: 'feature' }), ctx, { requiresVision: true });
     expect(route.model).toBe('no-vision-model');
   });
 
@@ -421,11 +413,7 @@ describe('pick with requiresVision', () => {
     process.env.OPENROUTER_API_KEY = 'sk-or-test';
     process.env.PATH = '';
     const ctx = { registry: new ProviderRegistry(defaultProviders()) };
-    const route = pick(
-      classification({ taskType: 'feature' }),
-      ctx,
-      { requiresVision: true },
-    );
+    const route = pick(classification({ taskType: 'feature' }), ctx, { requiresVision: true });
     expect(route.model).not.toBe('no-vision-model');
     expect(route.via).toMatch(/openrouter/);
     expect(route.rationale).toMatch(/vision/);
@@ -439,11 +427,7 @@ describe('pick with requiresVision', () => {
         preferredRoutes: [{ route: 'deepseek,deepseek-chat', reason: 'cheap' }],
       },
     };
-    const route = pick(
-      classification({ taskType: 'feature' }),
-      ctx,
-      { requiresVision: true },
-    );
+    const route = pick(classification({ taskType: 'feature' }), ctx, { requiresVision: true });
     // DeepSeek doesn't have visionInput in the catalog, so it should be skipped
     expect(route.provider).not.toBe('deepseek');
     expect(route.rationale).toMatch(/vision/);

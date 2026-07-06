@@ -30,7 +30,10 @@ const DEFAULTS: BiasOptions = {
   minSamples: 3,
 };
 
-export function deriveMemoryBias(store: Store, opts: Partial<BiasOptions> & { taskType: TaskType }): MemoryBias {
+export function deriveMemoryBias(
+  store: Store,
+  opts: Partial<BiasOptions> & { taskType: TaskType },
+): MemoryBias {
   const o = { ...DEFAULTS, ...opts };
   const stats = store.runs.routeStats(o.taskType);
 

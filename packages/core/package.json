@@ -19,9 +19,9 @@
       "types": "./dist/classify/index.d.ts",
       "import": "./dist/classify/index.js"
     },
-    "./router": {
-      "types": "./dist/router/index.d.ts",
-      "import": "./dist/router/index.js"
+    "./routing": {
+      "types": "./dist/routing/index.d.ts",
+      "import": "./dist/routing/index.js"
     },
     "./sandbox": {
       "types": "./dist/sandbox/index.d.ts",

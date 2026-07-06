@@ -18,8 +18,8 @@ import {
   verifyCitations,
 } from '../research/citations.js';
 import type { ResearchHit, ResearchProvider } from '../research/types.js';
-import { effortProfile } from '../router/effort.js';
-import { pick, pickStrong } from '../router/policy.js';
+import { effortProfile } from '../routing/effort.js';
+import { pick, pickStrong } from '../routing/policy.js';
 import { runDualPlan } from '../workflows/dualPlan.js';
 import { runTournament } from '../workflows/tournament.js';
 import type { Adapter } from '../adapters/types.js';

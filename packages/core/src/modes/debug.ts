@@ -4,7 +4,7 @@ import { dirname, join } from 'node:path';
 import { ClassifierCascade, loadSeedCorpus } from '../classify/index.js';
 import { scanContext } from '../context/scan.js';
 import { exec } from '../sandbox/exec.js';
-import { pickStrong } from '../router/policy.js';
+import { pickStrong } from '../routing/policy.js';
 import { runTournament } from '../workflows/tournament.js';
 import type { Adapter } from '../adapters/types.js';
 import type { RouteRef } from '../types.js';

@@ -5,7 +5,7 @@ export default defineConfig({
     'src/index.ts',
     'src/adapters/index.ts',
     'src/classify/index.ts',
-    'src/router/index.ts',
+    'src/routing/index.ts',
     'src/sandbox/index.ts',
     'src/validate/index.ts',
     'src/modes/index.ts',

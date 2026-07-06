@@ -2,7 +2,7 @@ import type { ActivityEvent, Adapter, AskUserQuestionPayload } from '../adapters
 import type { ChatMessage } from '../agent/transport/types.js';
 import type { Clarification } from '../clarify/types.js';
 import type { ProviderRegistry } from '../providers/registry.js';
-import type { RouterContext } from '../router/policy.js';
+import type { RouterContext } from '../routing/policy.js';
 import type { InjectionFinding } from '../security/injection.js';
 import type { Store } from '../store/index.js';
 import type {

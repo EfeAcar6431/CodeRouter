@@ -129,7 +129,13 @@ export function pick(
       qualityBias: ctx.qualityBias,
       latencyBias: ctx.latencyBias,
     };
-    const intentsToTry: Intent[] = ['balanced-agent', 'multi-file', 'huge-context', 'deep-reasoning', 'fast-cheap'];
+    const intentsToTry: Intent[] = [
+      'balanced-agent',
+      'multi-file',
+      'huge-context',
+      'deep-reasoning',
+      'fast-cheap',
+    ];
     for (const intent of intentsToTry) {
       const r = resolveIntent(intent, ctx.registry, visionOpts);
       if (r) return { ...r, rationale: `vision:${r.rationale}` };
@@ -153,7 +159,8 @@ export function pick(
   const qualityBias = effectiveQualityBias(ctx, classification.taskType);
   const forbidRoutes = ctx.memoryBias?.forbiddenRoutes ?? [];
   const requireEditable = opts.requireEditable;
-  const editableOk = (r: RouteRef): boolean => !(requireEditable && !EDITABLE_ADAPTERS.has(r.provider));
+  const editableOk = (r: RouteRef): boolean =>
+    !(requireEditable && !EDITABLE_ADAPTERS.has(r.provider));
 
   // 3) Instant routes (typo, format, commit-message...) always win.
   const instant = matchInstant(classification.rationale);
@@ -216,11 +223,15 @@ export function pick(
   );
   if (primary) return primary;
   if (policy.intent !== 'balanced-agent') {
-    const balanced = resolveByPolicy('balanced-agent', `policy:${policy.name} (fallback: balanced)`);
+    const balanced = resolveByPolicy(
+      'balanced-agent',
+      `policy:${policy.name} (fallback: balanced)`,
+    );
     if (balanced) return balanced;
   }
   const cheap = pickByHint('cheap', ctx, requireEditable);
-  if (cheap && editableOk(cheap)) return { ...cheap, rationale: `policy:${policy.name} (fallback: cheap)` };
+  if (cheap && editableOk(cheap))
+    return { ...cheap, rationale: `policy:${policy.name} (fallback: cheap)` };
 
   // 7) Last resort: the first ready provider in the registry. When the
   //    caller demanded an editable provider, skip chat-only adapters here
@@ -293,12 +304,7 @@ export function pickStrong(
   return uniq.slice(0, Math.max(1, profile.tournamentSize));
 }
 
-
-function preferProvider(
-  ctx: RouterContext,
-  providers: string[],
-  model: string,
-): RouteRef | null {
+function preferProvider(ctx: RouterContext, providers: string[], model: string): RouteRef | null {
   for (const name of providers) {
     const cfg = ctx.registry.list().find((p) => p.name === name);
     if (!cfg) continue;
@@ -347,7 +353,12 @@ function pickByHint(
 function parseRouteRef(route: string): RouteRef | null {
   const [provider, ...rest] = route.split(',');
   if (!provider || rest.length === 0) return null;
-  return { provider: provider as RouteRef['provider'], model: rest.join(','), rationale: '', via: provider };
+  return {
+    provider: provider as RouteRef['provider'],
+    model: rest.join(','),
+    rationale: '',
+    via: provider,
+  };
 }
 
 /** Bounded coding-score bonus for a route the project has succeeded on. */
@@ -367,7 +378,10 @@ const MEMORY_PREFERENCE_CAP = 12;
  *      tip genuinely close decisions. Forbidden / not-ready / unconfigured
  *      routes contribute nothing.
  */
-function effectiveQualityBias(ctx: RouterContext, taskClass: string): Map<string, number> | undefined {
+function effectiveQualityBias(
+  ctx: RouterContext,
+  taskClass: string,
+): Map<string, number> | undefined {
   const prefs = ctx.memoryBias?.preferredRoutes ?? [];
   const perClass = ctx.policyBias?.get(taskClass);
   if (prefs.length === 0 && !perClass) return ctx.qualityBias;

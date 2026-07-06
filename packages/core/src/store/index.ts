@@ -4,6 +4,7 @@ import { FactStore, FailurePatternStore, OverrideStore } from './facts.js';
 import { LearnedStore } from './learned.js';
 import { LoopStore } from './loops.js';
 import { migrate } from './migrations.js';
+import { RoutingStore } from './routing.js';
 import { RunStore } from './runs.js';
 import { SessionStore } from './sessions.js';
 
@@ -14,6 +15,7 @@ export * from './learned.js';
 export * from './loops.js';
 export * from './migrations.js';
 export * from './projects.js';
+export * from './routing.js';
 export * from './runs.js';
 export * from './sessions.js';
 
@@ -27,6 +29,7 @@ export type Store = {
   failures: FailurePatternStore;
   loops: LoopStore;
   chats: ChatStore;
+  routing: RoutingStore;
 };
 
 /**
@@ -50,6 +53,7 @@ export async function openStore(path: string): Promise<Store> {
     failures: new FailurePatternStore(db),
     loops: new LoopStore(db),
     chats: new ChatStore(db),
+    routing: new RoutingStore(db),
   };
 }
 

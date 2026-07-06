@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { exec } from '../sandbox/exec.js';
-import { pickStrong } from '../router/policy.js';
+import { pickStrong } from '../routing/policy.js';
 import { ClassifierCascade, loadSeedCorpus } from '../classify/index.js';
 import type { Adapter } from '../adapters/types.js';
 import type { RouteRef } from '../types.js';

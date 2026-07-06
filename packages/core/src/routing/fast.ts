@@ -27,15 +27,14 @@ export function fastClassification(
     source: 'instant',
     confidence: 0.5,
     taskType: lastKnown?.taskType ?? 'feature',
-    shape:
-      lastKnown?.shape ?? {
-        deepReasoning: 0.4,
-        multiFileTaste: 0.4,
-        hugeContext: 0.2,
-        adversarial: 0.2,
-        algorithmic: 0.2,
-        exploratory: 0.4,
-      },
+    shape: lastKnown?.shape ?? {
+      deepReasoning: 0.4,
+      multiFileTaste: 0.4,
+      hugeContext: 0.2,
+      adversarial: 0.2,
+      algorithmic: 0.2,
+      exploratory: 0.4,
+    },
     rationale: `fast-mode: skipping classifier, context, validators (prompt=${prompt.slice(0, 80)})`,
   };
 }

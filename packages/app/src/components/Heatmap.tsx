@@ -4,8 +4,20 @@ import { cls } from './common';
 
 type Hover = { day: HeatmapDay; x: number; y: number };
 
-/** GitHub-style contribution grid with a floating hover tooltip. */
-export function Heatmap({ days }: { days: HeatmapDay[] }): React.ReactElement {
+/**
+ * GitHub-style contribution grid with a floating hover tooltip. When
+ * `onSelect` is provided each cell is clickable and the `selectedDate` cell
+ * is drawn with a bright accent ring so it's unmistakably "the selected day".
+ */
+export function Heatmap({
+  days,
+  selectedDate,
+  onSelect,
+}: {
+  days: HeatmapDay[];
+  selectedDate?: string | null;
+  onSelect?: (date: string) => void;
+}): React.ReactElement {
   const [hover, setHover] = useState<Hover | null>(null);
 
   if (!days || days.length === 0) return <div className="text-sm text-muted">No activity yet.</div>;
@@ -33,18 +45,24 @@ export function Heatmap({ days }: { days: HeatmapDay[] }): React.ReactElement {
       <div className="flex gap-[3px] overflow-x-auto">
         {weeks.map((w, wi) => (
           <div key={wi} className="flex flex-col gap-[3px]">
-            {w.map((d) => (
-              <div
-                key={d.date}
-                onMouseEnter={(e) => move(e, d)}
-                onMouseMove={(e) => move(e, d)}
-                onMouseLeave={() => setHover(null)}
-                className={cls(
-                  'h-[12px] w-[12px] rounded-[2px] ring-offset-0 transition-colors hover:ring-1 hover:ring-accent',
-                  colors[level(d.runs)],
-                )}
-              />
-            ))}
+            {w.map((d) => {
+              const selected = selectedDate === d.date;
+              return (
+                <div
+                  key={d.date}
+                  onMouseEnter={(e) => move(e, d)}
+                  onMouseMove={(e) => move(e, d)}
+                  onMouseLeave={() => setHover(null)}
+                  onClick={onSelect ? () => onSelect(d.date) : undefined}
+                  className={cls(
+                    'h-[12px] w-[12px] rounded-[2px] transition-colors',
+                    colors[level(d.runs)],
+                    onSelect && 'cursor-pointer hover:ring-1 hover:ring-accent',
+                    selected && 'ring-2 ring-accent ring-offset-1 ring-offset-panel',
+                  )}
+                />
+              );
+            })}
           </div>
         ))}
       </div>

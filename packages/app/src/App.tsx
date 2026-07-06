@@ -4,6 +4,7 @@ import {
   Blocks,
   ChevronRight,
   ClipboardList,
+  FileDiff,
   Folder,
   FolderOpen,
   FolderPlus,
@@ -16,6 +17,7 @@ import {
   PanelLeft,
   PanelRight,
   RefreshCw,
+  Search,
   Settings as SettingsIcon,
   Sparkles,
   SquarePen,
@@ -25,9 +27,9 @@ import {
   X,
 } from 'lucide-react';
 import { api, execCommand, isMac, type ChatSummary, type ProjectSummary } from './lib/api';
-import { LoopEventsProvider, useDaemonConnected, usePlanOpen } from './lib/events';
+import { LoopEventsProvider, useDaemonConnected, usePlanOpen, usePreviewOpen } from './lib/events';
 import { useTheme, type ThemePref } from './lib/theme';
-import { cls } from './components/common';
+import { cls, timeAgo } from './components/common';
 import { Logo } from './components/Logo';
 import { Terminal } from './components/Terminal';
 import { ChangesPanel } from './components/ChangesPanel';
@@ -77,13 +79,22 @@ function Shell(): React.ReactElement {
     }
   });
   const [sidebarOpen, setSidebarOpen] = useState(true);
-  const [sidePanelOpen, setSidePanelOpen] = useState(false);
-  // Right dock: a single panel on the right with a tab switcher for the
-  // browser preview, a real terminal, and the file explorer. `null` = closed.
-  const [rightTab, setRightTab] = useState<RightTab | null>(null);
+  const [searchOpen, setSearchOpen] = useState(false);
+  // Dockable side panels (files / browser / terminal / changes). Each panel
+  // can be opened/closed, docked to the left or right of the main content, and
+  // its dock resized. `files` opens on the left by default (IDE-style). The
+  // whole layout is persisted so it survives reloads.
+  const [panels, setPanels] = useState<Record<PanelId, PanelState>>(() => loadLayout().panels);
+  const [activeBySide, setActiveBySide] = useState<Record<Side, PanelId | null>>(() => loadLayout().activeBySide);
+  const [leftWidth, setLeftWidth] = useState<number>(() => loadLayout().leftWidth);
+  const [rightWidth, setRightWidth] = useState<number>(() => loadLayout().rightWidth);
   // In-app browser preview URL; opens automatically (on the Browser tab) when
   // the agent starts a dev server whose URL we detect.
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  // Whether previews open in the built-in browser (default) or the OS
+  // browser. Mirrors the global setting; a false value routes open_preview
+  // to the external browser instead of the right-dock Browser tab.
+  const [previewInApp, setPreviewInApp] = useState(true);
   const [insertText, setInsertText] = useState<{ text: string; nonce: number } | null>(null);
   const [changes, setChanges] = useState<ChatChanges | null>(null);
   // Plan workspace: which plan to open, and a pending chat seed (prompt +
@@ -126,21 +137,75 @@ function Shell(): React.ReactElement {
       });
   }, []);
 
-  // Toggle a right-dock tab: clicking the active tab's control closes the
-  // dock, otherwise it opens/switches to that tab.
-  const toggleRightTab = (t: RightTab): void => setRightTab((cur) => (cur === t ? null : t));
+  // CLI -> app handoff: a CLI-run agent called open_preview with the pref on,
+  // so show the URL in the built-in browser here.
+  usePreviewOpen((e) => {
+    showInAppBrowser(e.url);
+  }, []);
 
-  // ⌘J / Ctrl+J toggles the terminal (now a tab in the right dock), matching Codex.
+  // Load the preview-target preference; the setting page updates it live via
+  // the custom event below so we don't have to poll.
+  useEffect(() => {
+    void api.settings().then((s) => setPreviewInApp(s.previewInApp)).catch(() => {});
+    const onPref = (e: Event): void => {
+      const detail = (e as CustomEvent<{ previewInApp: boolean }>).detail;
+      if (detail && typeof detail.previewInApp === 'boolean') setPreviewInApp(detail.previewInApp);
+    };
+    window.addEventListener('cr:preview-in-app', onPref as EventListener);
+    return () => window.removeEventListener('cr:preview-in-app', onPref as EventListener);
+  }, []);
+
+  // Persist the whole dock layout (which panels are open, their side, and the
+  // dock widths) so it survives reloads.
+  useEffect(() => {
+    try {
+      localStorage.setItem('cr.layout', JSON.stringify({ panels, activeBySide, leftWidth, rightWidth }));
+    } catch {
+      /* ignore quota errors */
+    }
+  }, [panels, activeBySide, leftWidth, rightWidth]);
+
+  // --- dockable panel actions ------------------------------------------------
+  const openPanel = (id: PanelId): void => {
+    const side = panels[id].side;
+    setPanels((p) => ({ ...p, [id]: { ...p[id], open: true } }));
+    setActiveBySide((a) => ({ ...a, [side]: id }));
+  };
+  const togglePanel = (id: PanelId): void => {
+    const side = panels[id].side;
+    const willOpen = !panels[id].open;
+    setPanels((p) => ({ ...p, [id]: { ...p[id], open: willOpen } }));
+    setActiveBySide((a) => (willOpen ? { ...a, [side]: id } : a[side] === id ? { ...a, [side]: null } : a));
+  };
+  const closePanel = (id: PanelId): void => {
+    const side = panels[id].side;
+    setPanels((p) => ({ ...p, [id]: { ...p[id], open: false } }));
+    setActiveBySide((a) => (a[side] === id ? { ...a, [side]: null } : a));
+  };
+  // Swap a panel to the opposite side (left <-> right).
+  const movePanel = (id: PanelId): void => {
+    const from = panels[id].side;
+    const to: Side = from === 'left' ? 'right' : 'left';
+    setPanels((p) => ({ ...p, [id]: { ...p[id], side: to } }));
+    setActiveBySide((a) => ({ ...a, [to]: id, [from]: a[from] === id ? null : a[from] }));
+  };
+
+  // ⌘J toggles the terminal; ⌘K / ⌘P opens search — matching Codex/Claude.
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'j') {
+      const meta = e.metaKey || e.ctrlKey;
+      if (meta && e.key.toLowerCase() === 'j') {
         e.preventDefault();
-        setRightTab((cur) => (cur === 'terminal' ? null : 'terminal'));
+        togglePanel('terminal');
+      } else if (meta && (e.key.toLowerCase() === 'k' || e.key.toLowerCase() === 'p')) {
+        e.preventDefault();
+        setSearchOpen(true);
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [panels]);
 
   useEffect(() => {
     void api
@@ -272,14 +337,46 @@ function Shell(): React.ReactElement {
     });
   };
 
-  // Auto-open the in-app browser when the agent starts a dev server whose
-  // URL we detected. Only steal focus the first time / when the URL changes.
+  // Show a URL the agent produced (dev server, or an open_preview call).
+  // Honors the preview-in-app setting: the built-in browser panel when on,
+  // the OS default browser when off.
   const showServerUrl = (url: string): void => {
+    if (previewInApp) {
+      setPreviewUrl(url);
+      openPanel('browser');
+    } else {
+      void api.openUrl(url);
+    }
+  };
+
+  // Force the built-in browser regardless of the setting - used for explicit
+  // CLI -> app preview handoffs (the CLI already decided to route here).
+  const showInAppBrowser = (url: string): void => {
     setPreviewUrl(url);
-    setRightTab('browser');
+    openPanel('browser');
   };
 
   const activeName = allProjects.find((p) => p.cwd === project)?.name;
+
+  // Panels currently open on each side, plus the resolved active tab (falls
+  // back to the first open panel when the stored active one isn't here).
+  const leftPanels = PANEL_ORDER.filter((id) => panels[id].open && panels[id].side === 'left');
+  const rightPanels = PANEL_ORDER.filter((id) => panels[id].open && panels[id].side === 'right');
+  const leftActive = leftPanels.includes(activeBySide.left as PanelId) ? activeBySide.left : leftPanels[0] ?? null;
+  const rightActive = rightPanels.includes(activeBySide.right as PanelId) ? activeBySide.right : rightPanels[0] ?? null;
+
+  const renderPanel = (id: PanelId): React.ReactElement => {
+    switch (id) {
+      case 'files':
+        return <FileTree project={project} onMention={mentionFile} onOpenFile={openFileInEditor} />;
+      case 'browser':
+        return <Preview url={previewUrl} isElectron={Boolean(window.coderouter?.isElectron)} />;
+      case 'terminal':
+        return <Terminal project={project} />;
+      case 'changes':
+        return <ChangesPanel changes={changes} />;
+    }
+  };
 
   return (
     <div className="flex h-full">
@@ -302,6 +399,14 @@ function Shell(): React.ReactElement {
         </div>
 
         <nav className="flex-1 overflow-y-auto px-2 pb-2">
+          <button
+            onClick={() => setSearchOpen(true)}
+            className="no-drag mb-0.5 flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-left text-sm font-medium text-muted transition-colors hover:bg-panel2 hover:text-text"
+          >
+            <Search className="h-[17px] w-[17px] shrink-0" strokeWidth={2} />
+            Search
+            <span className="ml-auto text-[11px] text-muted/60">⌘K</span>
+          </button>
           {TOP_NAV.map((n) => {
             const Icon = n.icon;
             const active = n.id === 'chat' ? nav === 'chat' && (chatId === 'new' || chatId == null) : nav === n.id;
@@ -422,13 +527,29 @@ function Shell(): React.ReactElement {
             {(nav === 'loops' || nav === 'chat') && activeName && (
               <span className="mr-1 max-w-[180px] truncate text-xs text-muted">{activeName}</span>
             )}
-            <PanelToggle icon={Globe} active={rightTab === 'browser'} onClick={() => toggleRightTab('browser')} title="Browser preview" />
-            <PanelToggle icon={SquareTerminal} active={rightTab === 'terminal'} onClick={() => toggleRightTab('terminal')} title="Terminal (⌘J)" />
-            <PanelToggle icon={FolderTree} active={rightTab === 'files'} onClick={() => toggleRightTab('files')} title="File explorer" />
-            <PanelToggle icon={PanelRight} active={sidePanelOpen} onClick={() => setSidePanelOpen((o) => !o)} title="Toggle changes panel" />
+            <PanelToggle icon={FolderTree} active={panels.files.open} onClick={() => togglePanel('files')} title="File explorer" />
+            <PanelToggle icon={Globe} active={panels.browser.open} onClick={() => togglePanel('browser')} title="Browser preview" />
+            <PanelToggle icon={SquareTerminal} active={panels.terminal.open} onClick={() => togglePanel('terminal')} title="Terminal (⌘J)" />
+            <PanelToggle icon={FileDiff} active={panels.changes.open} onClick={() => togglePanel('changes')} title="Changes" />
           </div>
         </header>
         <div className="flex min-h-0 flex-1">
+          {leftPanels.length > 0 && (
+            <>
+              <aside style={{ width: leftWidth }} className="min-w-[12rem] max-w-[60vw] shrink-0 bg-panel">
+                <Dock
+                  side="left"
+                  panelIds={leftPanels}
+                  active={leftActive}
+                  onActivate={(id) => setActiveBySide((a) => ({ ...a, left: id }))}
+                  onClose={closePanel}
+                  onMove={movePanel}
+                  renderPanel={renderPanel}
+                />
+              </aside>
+              <ResizeHandle onResize={(dx) => setLeftWidth((w) => clampWidth(w + dx))} />
+            </>
+          )}
           <div className={cls('min-h-0 flex-1', nav === 'chat' || nav === 'plans' ? 'overflow-hidden' : 'overflow-y-auto')}>
             {nav === 'chat' ? (
               <ChatPage
@@ -451,7 +572,7 @@ function Shell(): React.ReactElement {
             ) : (
               // Universal page container: one place controls width + side
               // margins for every section so they stay consistent.
-              <div className={cls('mx-auto w-full max-w-6xl px-12 py-6', nav === 'plans' && 'h-full')}>
+              <div className={cls('mx-auto w-full max-w-6xl px-6 py-6', nav === 'plans' && 'h-full')}>
                 {nav === 'overview' && <OverviewArea />}
                 {nav === 'plans' && (
                   <PlansPage
@@ -472,115 +593,375 @@ function Shell(): React.ReactElement {
               </div>
             )}
           </div>
-          {rightTab && (
-            <aside className="w-[34rem] max-w-[55vw] min-w-[22rem] shrink-0 border-l border-border bg-panel">
-              <RightDock
-                tab={rightTab}
-                onTab={setRightTab}
-                onClose={() => setRightTab(null)}
-                project={project}
-                previewUrl={previewUrl}
-                isElectron={Boolean(window.coderouter?.isElectron)}
-                onMention={mentionFile}
-                onOpenFile={openFileInEditor}
-              />
-            </aside>
-          )}
-          {sidePanelOpen && (
-            <aside className="w-96 shrink-0 border-l border-border bg-panel">
-              <ChangesPanel changes={changes} />
-            </aside>
+          {rightPanels.length > 0 && (
+            <>
+              <ResizeHandle onResize={(dx) => setRightWidth((w) => clampWidth(w - dx))} />
+              <aside style={{ width: rightWidth }} className="min-w-[16rem] max-w-[65vw] shrink-0 bg-panel">
+                <Dock
+                  side="right"
+                  panelIds={rightPanels}
+                  active={rightActive}
+                  onActivate={(id) => setActiveBySide((a) => ({ ...a, right: id }))}
+                  onClose={closePanel}
+                  onMove={movePanel}
+                  renderPanel={renderPanel}
+                />
+              </aside>
+            </>
           )}
         </div>
       </main>
+      {searchOpen && (
+        <SearchPalette
+          chats={chats}
+          projects={allProjects}
+          onClose={() => setSearchOpen(false)}
+          onOpenChat={(c) => {
+            openChat(c);
+            setSearchOpen(false);
+          }}
+          onOpenProject={(cwd) => {
+            setProject(cwd);
+            setExpanded((e) => new Set(e).add(cwd));
+            newChat();
+            setSearchOpen(false);
+          }}
+        />
+      )}
     </div>
   );
 }
 
-type RightTab = 'browser' | 'terminal' | 'files';
+// --- dockable side panels ----------------------------------------------------
 
-const DOCK_TABS: { id: RightTab; label: string; icon: LucideIcon }[] = [
-  { id: 'browser', label: 'Browser', icon: Globe },
-  { id: 'terminal', label: 'Terminal', icon: SquareTerminal },
-  { id: 'files', label: 'Files', icon: FolderTree },
-];
+type PanelId = 'files' | 'browser' | 'terminal' | 'changes';
+type Side = 'left' | 'right';
+type PanelState = { open: boolean; side: Side };
+
+const PANEL_ORDER: PanelId[] = ['files', 'browser', 'terminal', 'changes'];
+
+const PANEL_META: Record<PanelId, { label: string; icon: LucideIcon }> = {
+  files: { label: 'Files', icon: FolderTree },
+  browser: { label: 'Browser', icon: Globe },
+  terminal: { label: 'Terminal', icon: SquareTerminal },
+  changes: { label: 'Changes', icon: FileDiff },
+};
+
+const DEFAULT_PANELS: Record<PanelId, PanelState> = {
+  files: { open: true, side: 'left' },
+  browser: { open: false, side: 'right' },
+  terminal: { open: false, side: 'right' },
+  changes: { open: false, side: 'right' },
+};
+
+type Layout = {
+  panels: Record<PanelId, PanelState>;
+  activeBySide: Record<Side, PanelId | null>;
+  leftWidth: number;
+  rightWidth: number;
+};
+
+function clampWidth(w: number): number {
+  return Math.min(760, Math.max(200, Math.round(w)));
+}
+
+/** Load the persisted dock layout, falling back to sensible IDE defaults. */
+function loadLayout(): Layout {
+  const fallback: Layout = {
+    panels: DEFAULT_PANELS,
+    activeBySide: { left: 'files', right: null },
+    leftWidth: 260,
+    rightWidth: 480,
+  };
+  try {
+    const raw = localStorage.getItem('cr.layout');
+    if (!raw) return fallback;
+    const p = JSON.parse(raw) as Partial<Layout>;
+    return {
+      panels: { ...DEFAULT_PANELS, ...(p.panels ?? {}) },
+      activeBySide: {
+        left: p.activeBySide?.left ?? 'files',
+        right: p.activeBySide?.right ?? null,
+      },
+      leftWidth: clampWidth(p.leftWidth ?? 260),
+      rightWidth: clampWidth(p.rightWidth ?? 480),
+    };
+  } catch {
+    return fallback;
+  }
+}
 
 /**
- * Unified right-side dock with a tab switcher for the browser preview, a
- * real terminal, and the file explorer. Visited tabs stay mounted (hidden
- * when inactive) so switching tabs never tears down a live PTY session or
- * reloads the preview webview — only closing the whole dock does.
+ * A draggable divider that reports incremental horizontal movement so the
+ * caller can grow/shrink the adjacent dock. Widens the hit area beyond the
+ * visible 1px line for easier grabbing.
  */
-function RightDock({
-  tab,
-  onTab,
+function ResizeHandle({ onResize }: { onResize: (dx: number) => void }): React.ReactElement {
+  const onMouseDown = (e: React.MouseEvent): void => {
+    e.preventDefault();
+    let last = e.clientX;
+    const move = (ev: MouseEvent): void => {
+      onResize(ev.clientX - last);
+      last = ev.clientX;
+    };
+    const up = (): void => {
+      document.removeEventListener('mousemove', move);
+      document.removeEventListener('mouseup', up);
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    };
+    document.addEventListener('mousemove', move);
+    document.addEventListener('mouseup', up);
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+  };
+  return (
+    <div
+      onMouseDown={onMouseDown}
+      className="group relative z-10 -mx-[3px] w-[7px] shrink-0 cursor-col-resize"
+      title="Drag to resize"
+    >
+      <div className="mx-auto h-full w-px bg-border transition-colors group-hover:bg-accent/70" />
+    </div>
+  );
+}
+
+/**
+ * A dockable panel container. Renders a tab strip for every panel open on its
+ * side, plus per-panel controls to move it to the other side or close it.
+ * Visited panels stay mounted (hidden) so switching tabs doesn't tear down a
+ * live terminal or reload the preview — only closing (or moving) does.
+ */
+function Dock({
+  side,
+  panelIds,
+  active,
+  onActivate,
   onClose,
-  project,
-  previewUrl,
-  isElectron,
-  onMention,
-  onOpenFile,
+  onMove,
+  renderPanel,
 }: {
-  tab: RightTab;
-  onTab: (t: RightTab) => void;
-  onClose: () => void;
-  project: string | null;
-  previewUrl: string | null;
-  isElectron: boolean;
-  onMention: (relPath: string) => void;
-  onOpenFile: (relPath: string) => void;
+  side: Side;
+  panelIds: PanelId[];
+  active: PanelId | null;
+  onActivate: (id: PanelId) => void;
+  onClose: (id: PanelId) => void;
+  onMove: (id: PanelId) => void;
+  renderPanel: (id: PanelId) => React.ReactElement;
 }): React.ReactElement {
-  const [visited, setVisited] = useState<Set<RightTab>>(() => new Set<RightTab>([tab]));
+  const [visited, setVisited] = useState<Set<PanelId>>(() => new Set(active ? [active] : []));
   useEffect(() => {
-    setVisited((v) => (v.has(tab) ? v : new Set(v).add(tab)));
-  }, [tab]);
+    if (active) setVisited((v) => (v.has(active) ? v : new Set(v).add(active)));
+  }, [active]);
 
   return (
     <div className="flex h-full flex-col bg-panel">
       <div className="flex h-10 shrink-0 items-center gap-1 border-b border-border px-2">
-        {DOCK_TABS.map((t) => {
-          const Icon = t.icon;
-          const active = t.id === tab;
-          return (
+        <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto">
+          {panelIds.map((id) => {
+            const { label, icon: Icon } = PANEL_META[id];
+            const isActive = id === active;
+            return (
+              <button
+                key={id}
+                onClick={() => onActivate(id)}
+                className={cls(
+                  'flex shrink-0 items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium transition-colors',
+                  isActive ? 'bg-accent/20 text-accent' : 'text-muted hover:bg-panel2 hover:text-text',
+                )}
+              >
+                <Icon className="h-3.5 w-3.5 shrink-0" strokeWidth={2} />
+                {label}
+              </button>
+            );
+          })}
+        </div>
+        {active && (
+          <div className="flex shrink-0 items-center gap-0.5">
             <button
-              key={t.id}
-              onClick={() => onTab(t.id)}
-              className={cls(
-                'flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium transition-colors',
-                active ? 'bg-accent/20 text-accent' : 'text-muted hover:bg-panel2 hover:text-text',
-              )}
+              onClick={() => onMove(active)}
+              title={side === 'left' ? 'Move panel to the right' : 'Move panel to the left'}
+              className="flex h-7 w-7 items-center justify-center rounded-md text-muted transition-colors hover:bg-panel2 hover:text-text"
             >
-              <Icon className="h-3.5 w-3.5 shrink-0" strokeWidth={2} />
-              {t.label}
+              {side === 'left' ? (
+                <PanelRight className="h-4 w-4" strokeWidth={2} />
+              ) : (
+                <PanelLeft className="h-4 w-4" strokeWidth={2} />
+              )}
             </button>
-          );
-        })}
-        <button
-          onClick={onClose}
-          title="Close panel"
-          className="ml-auto flex h-7 w-7 items-center justify-center rounded-md text-muted transition-colors hover:bg-panel2 hover:text-text"
-        >
-          <X className="h-4 w-4" strokeWidth={2} />
-        </button>
+            <button
+              onClick={() => onClose(active)}
+              title="Close panel"
+              className="flex h-7 w-7 items-center justify-center rounded-md text-muted transition-colors hover:bg-panel2 hover:text-text"
+            >
+              <X className="h-4 w-4" strokeWidth={2} />
+            </button>
+          </div>
+        )}
       </div>
       <div className="min-h-0 flex-1">
-        {visited.has('browser') && (
-          <div className={cls('h-full', tab === 'browser' ? 'block' : 'hidden')}>
-            <Preview url={previewUrl} isElectron={isElectron} />
-          </div>
-        )}
-        {visited.has('terminal') && (
-          <div className={cls('h-full', tab === 'terminal' ? 'block' : 'hidden')}>
-            <Terminal project={project} />
-          </div>
-        )}
-        {visited.has('files') && (
-          <div className={cls('h-full', tab === 'files' ? 'block' : 'hidden')}>
-            <FileTree project={project} onMention={onMention} onOpenFile={onOpenFile} />
-          </div>
-        )}
+        {[...visited]
+          .filter((id) => panelIds.includes(id))
+          .map((id) => (
+            <div key={id} className={cls('h-full', id === active ? 'block' : 'hidden')}>
+              {renderPanel(id)}
+            </div>
+          ))}
       </div>
     </div>
+  );
+}
+
+type SearchHit =
+  | { kind: 'chat'; chat: ChatSummary; projectName: string }
+  | { kind: 'project'; project: ProjectSummary };
+
+/**
+ * Command-palette style search (⌘K) over projects and chats, in the spirit
+ * of Codex/Claude. Type to fuzzily filter; ↑/↓ to move, ↵ to open, Esc to
+ * dismiss. Chats and projects are ranked most-recent-first.
+ */
+function SearchPalette({
+  chats,
+  projects,
+  onClose,
+  onOpenChat,
+  onOpenProject,
+}: {
+  chats: ChatSummary[];
+  projects: ProjectSummary[];
+  onClose: () => void;
+  onOpenChat: (c: ChatSummary) => void;
+  onOpenProject: (cwd: string) => void;
+}): React.ReactElement {
+  const [q, setQ] = useState('');
+  const [active, setActive] = useState(0);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    inputRef.current?.focus();
+  }, []);
+
+  const nameByCwd = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const p of projects) m.set(p.cwd, p.name);
+    return m;
+  }, [projects]);
+
+  const hits = useMemo<SearchHit[]>(() => {
+    const needle = q.trim().toLowerCase();
+    const chatHits: ChatSummary[] = [...chats]
+      .filter((c) => {
+        if (!needle) return true;
+        const name = nameByCwd.get(c.cwd) ?? '';
+        return (c.title || 'Untitled').toLowerCase().includes(needle) || name.toLowerCase().includes(needle);
+      })
+      .sort((a, b) => b.updatedAt - a.updatedAt)
+      .slice(0, 8);
+    const projHits: ProjectSummary[] = projects
+      .filter((p) => {
+        if (!needle) return true;
+        return p.name.toLowerCase().includes(needle) || p.cwd.toLowerCase().includes(needle);
+      })
+      .slice(0, 5);
+    return [
+      ...projHits.map((project) => ({ kind: 'project', project }) as SearchHit),
+      ...chatHits.map(
+        (chat) => ({ kind: 'chat', chat, projectName: nameByCwd.get(chat.cwd) ?? '' }) as SearchHit,
+      ),
+    ];
+  }, [q, chats, projects, nameByCwd]);
+
+  useEffect(() => {
+    setActive(0);
+  }, [q]);
+
+  const choose = (h: SearchHit): void => {
+    if (h.kind === 'chat') onOpenChat(h.chat);
+    else onOpenProject(h.project.cwd);
+  };
+
+  const onKey = (e: React.KeyboardEvent): void => {
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      onClose();
+    } else if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setActive((i) => Math.min(i + 1, Math.max(0, hits.length - 1)));
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setActive((i) => Math.max(i - 1, 0));
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      const h = hits[active];
+      if (h) choose(h);
+    }
+  };
+
+  return createPortal(
+    <div
+      className="fixed inset-0 z-[100] flex items-start justify-center bg-black/50 pt-[12vh]"
+      onMouseDown={onClose}
+    >
+      <div
+        className="w-full max-w-xl overflow-hidden rounded-xl border border-border bg-panel shadow-2xl shadow-black/50"
+        onMouseDown={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center gap-2 border-b border-border px-3">
+          <Search className="h-4 w-4 shrink-0 text-muted" strokeWidth={2} />
+          <input
+            ref={inputRef}
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            onKeyDown={onKey}
+            placeholder="Search chats and projects…"
+            className="w-full bg-transparent py-3 text-sm text-text outline-none placeholder:text-muted"
+          />
+          <kbd className="rounded border border-border px-1.5 py-0.5 text-[10px] text-muted">Esc</kbd>
+        </div>
+        <div className="max-h-[52vh] overflow-y-auto py-1.5">
+          {hits.length === 0 ? (
+            <div className="px-4 py-8 text-center text-sm text-muted">No matches.</div>
+          ) : (
+            hits.map((h, i) => {
+              const selected = i === active;
+              const base = cls(
+                'flex w-full items-center gap-2.5 px-3 py-2 text-left text-sm',
+                selected ? 'bg-accent/15 text-text' : 'text-muted hover:bg-panel2 hover:text-text',
+              );
+              if (h.kind === 'project') {
+                return (
+                  <button
+                    key={`p:${h.project.cwd}`}
+                    onMouseEnter={() => setActive(i)}
+                    onClick={() => choose(h)}
+                    className={base}
+                  >
+                    <Folder className="h-4 w-4 shrink-0" strokeWidth={2} />
+                    <span className="truncate font-medium text-text">{h.project.name}</span>
+                    <span className="ml-auto truncate pl-3 text-[11px] text-muted/70">Project</span>
+                  </button>
+                );
+              }
+              return (
+                <button
+                  key={`c:${h.chat.id}`}
+                  onMouseEnter={() => setActive(i)}
+                  onClick={() => choose(h)}
+                  className={base}
+                >
+                  <SquarePen className="h-4 w-4 shrink-0" strokeWidth={2} />
+                  <span className="truncate text-text">{h.chat.title || 'Untitled'}</span>
+                  {h.projectName && <span className="shrink-0 text-[11px] text-muted/70">· {h.projectName}</span>}
+                  <span className="ml-auto shrink-0 pl-3 text-[11px] text-muted/60">{timeAgo(h.chat.updatedAt)}</span>
+                </button>
+              );
+            })
+          )}
+        </div>
+      </div>
+    </div>,
+    document.body,
   );
 }
 

@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { api, type SettingsReport, type UsageReport } from '../lib/api';
 import { Heatmap } from '../components/Heatmap';
+import { DayDetail } from '../components/DayDetail';
 import { Section, Spinner, money } from '../components/common';
 import { ModelBadges } from '../components/ModelBadges';
 import { DEFAULT_LIMIT_USD, SpendingProgress } from './Spending';
@@ -8,6 +9,7 @@ import { DEFAULT_LIMIT_USD, SpendingProgress } from './Spending';
 export function OverviewPage(): React.ReactElement {
   const [data, setData] = useState<UsageReport | null>(null);
   const [settings, setSettings] = useState<SettingsReport | null>(null);
+  const [selectedDate, setSelectedDate] = useState<string | null>(null);
   useEffect(() => {
     void api.usage().then(setData).catch(() => {});
     void api.settings().then(setSettings).catch(() => {});
@@ -41,12 +43,25 @@ export function OverviewPage(): React.ReactElement {
 
       <Section title="Activity">
         <div className="card">
-          <Heatmap days={data.heatmap} />
+          <Heatmap
+            days={data.heatmap}
+            selectedDate={selectedDate}
+            onSelect={(d) => setSelectedDate((cur) => (cur === d ? null : d))}
+          />
           <div className="mt-3 flex flex-wrap gap-4 text-xs text-muted">
             <span>Current streak: <b className="text-text">{h.currentStreakDays}d</b></span>
             <span>Longest streak: <b className="text-text">{h.longestStreakDays}d</b></span>
             {h.mostActiveDay && <span>Most active day: <b className="text-text">{h.mostActiveDay}</b></span>}
+            {!selectedDate && <span className="text-muted/70">Tip: click a day to see that day's chats and cost.</span>}
           </div>
+          {selectedDate && (
+            <DayDetail
+              date={selectedDate}
+              day={data.heatmap.find((x) => x.date === selectedDate)}
+              runs={data.recentRuns}
+              onClear={() => setSelectedDate(null)}
+            />
+          )}
         </div>
       </Section>
 

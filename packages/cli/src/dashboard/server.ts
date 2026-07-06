@@ -17,6 +17,7 @@ import {
   setAutoApply,
   setHostEnabled,
   setPreferredModel,
+  setPreviewInApp,
   setRunMode,
   setSpendingLimit,
   SEARCH_PROVIDERS,
@@ -235,6 +236,13 @@ export async function handle(req: IncomingMessage, res: ServerResponse, cwd: str
         return sendJson(res, 400, { error: "runMode must be 'sandboxed', 'allowlist', or 'unsandboxed'" });
       setRunMode(body.runMode as RunMode);
       return sendJson(res, 200, { ok: true, runMode: body.runMode });
+    }
+
+    if (path === '/api/settings/preview-in-app' && method === 'POST') {
+      if (typeof body.enabled !== 'boolean')
+        return sendJson(res, 400, { error: 'enabled must be a boolean' });
+      setPreviewInApp(body.enabled);
+      return sendJson(res, 200, { ok: true, previewInApp: body.enabled });
     }
 
     if (path === '/api/settings/preferred-model' && method === 'POST') {

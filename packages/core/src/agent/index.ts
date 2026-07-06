@@ -33,6 +33,7 @@ export {
   globTool,
   grepTool,
   bashTool,
+  openPreviewTool,
   listDirTool,
   askUserQuestionTool,
 } from './tools/index.js';

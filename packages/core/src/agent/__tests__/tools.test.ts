@@ -22,6 +22,7 @@ import {
   grepTool,
   listDirTool,
   multiEditTool,
+  openPreviewTool,
   readFileTool,
   webSearchTool,
   withTool,
@@ -29,6 +30,7 @@ import {
   writeFileTool,
 } from '../tools/index.js';
 import type { ToolContext } from '../types.js';
+import type { ActivityEvent } from '../../adapters/types.js';
 
 let cwd: string;
 let ctx: ToolContext;
@@ -55,6 +57,7 @@ describe('default tool registry', () => {
       'edit_file',
       'multi_edit',
       'bash',
+      'open_preview',
       'ask_user_question',
     ]);
   });
@@ -188,6 +191,51 @@ describe('bash', () => {
     const r = await bashTool.run({ command: 'exit 7' }, ctx);
     expect(r.ok).toBe(false);
     expect(r.body).toContain('exit code: 7');
+  });
+});
+
+describe('open_preview', () => {
+  it('emits an http url unchanged for a running server', async () => {
+    const events: ActivityEvent[] = [];
+    const r = await openPreviewTool.run(
+      { target: 'http://localhost:5173' },
+      { ...ctx, onActivity: (e) => events.push(e) },
+    );
+    expect(r.ok).toBe(true);
+    expect(events).toEqual([{ kind: 'open_preview', url: 'http://localhost:5173' }]);
+  });
+
+  it('expands a bare host:port into an http url', async () => {
+    const events: ActivityEvent[] = [];
+    await openPreviewTool.run(
+      { target: 'localhost:8000' },
+      { ...ctx, onActivity: (e) => events.push(e) },
+    );
+    expect(events[0]).toMatchObject({ kind: 'open_preview', url: 'http://localhost:8000' });
+  });
+
+  it('resolves a project file to a file:// url', async () => {
+    await writeFile(join(cwd, 'index.html'), '<!doctype html><title>Game</title>');
+    const events: ActivityEvent[] = [];
+    const r = await openPreviewTool.run(
+      { target: 'index.html' },
+      { ...ctx, onActivity: (e) => events.push(e) },
+    );
+    expect(r.ok).toBe(true);
+    const ev = events[0] as Extract<ActivityEvent, { kind: 'open_preview' }>;
+    expect(ev.kind).toBe('open_preview');
+    expect(ev.url.startsWith('file://')).toBe(true);
+    expect(ev.url.endsWith('/index.html')).toBe(true);
+  });
+
+  it('fails (without emitting) when the file does not exist', async () => {
+    const events: ActivityEvent[] = [];
+    const r = await openPreviewTool.run(
+      { target: 'nope.html' },
+      { ...ctx, onActivity: (e) => events.push(e) },
+    );
+    expect(r.ok).toBe(false);
+    expect(events).toEqual([]);
   });
 });
 

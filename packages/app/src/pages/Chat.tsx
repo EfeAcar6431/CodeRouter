@@ -87,6 +87,18 @@ function mergeActivity(list: ActivityItem[], event: ActivityEvent): ActivityItem
       },
     ];
   }
+  if (event.kind === 'open_preview') {
+    return [
+      ...list,
+      {
+        id: activityIdSeq++,
+        kind: 'tool',
+        tool: 'open_preview',
+        description: `Opened ${event.url} in the browser`,
+        ok: true,
+      },
+    ];
+  }
   const last = list[list.length - 1];
   if (last && last.kind === 'thinking') {
     const next = list.slice();
@@ -248,8 +260,10 @@ export function ChatPage({
               return next;
             });
           } else if (e.type === 'activity') {
-            // Auto-open the in-app browser when a dev server URL is detected.
+            // Auto-open the in-app browser when a dev server URL is detected,
+            // or when the agent explicitly asks to show something (open_preview).
             if (e.event.kind === 'process_started' && e.event.url) onServerUrl?.(e.event.url);
+            else if (e.event.kind === 'open_preview') onServerUrl?.(e.event.url);
             setMessages((m) => {
               const next = [...m];
               const last = next[next.length - 1];

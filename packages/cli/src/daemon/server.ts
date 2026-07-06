@@ -297,6 +297,20 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse, cwd: str
     return handlePreview(req, res);
   }
 
+  // POST /api/preview/app -> CLI -> app handoff: broadcast a `preview-open`
+  // event so a running Studio shows the URL in its built-in browser. Returns
+  // `delivered` = the number of connected clients, so the CLI can fall back
+  // to the OS browser when no app is listening.
+  if (method === 'POST' && path === '/api/preview/app') {
+    if (!allowedOrigin(req)) return sendJson(res, 403, { error: 'cross-origin request rejected' });
+    const body = await readJson(req);
+    const target = String(body.url ?? '').trim();
+    if (!target) return sendJson(res, 400, { error: 'url required' });
+    const delivered = sseClients.size;
+    broadcastRaw({ type: 'preview-open', url: target, at: Date.now() });
+    return sendJson(res, 200, { ok: true, delivered });
+  }
+
   // ---- plans ------------------------------------------------------
   // GET /api/plans?cwd= -> list saved plans (.coderouter/plans/*.plan.md).
   if (method === 'GET' && path === '/api/plans') {

@@ -145,6 +145,163 @@ export async function exec(
   });
 }
 
+/**
+ * Outcome of {@link execForeground}: either the process exited on its own
+ * (we have its exit code + captured output), or it was still running when it
+ * clearly turned into a long-lived process (server / watcher / GUI / game) and
+ * we handed it off to the background instead of blocking the turn on it.
+ */
+export type ForegroundOutcome =
+  | { kind: 'exited'; stdout: string; stderr: string; exitCode: number; durationMs: number }
+  | { kind: 'running'; pid: number; output: string; durationMs: number };
+
+/**
+ * Run a foreground command but transparently hand it off to the background
+ * once it's obviously a persistent process, so the agent turn never wedges on
+ * a dev server or a `python game.py` that opens a window and loops forever.
+ *
+ * Resolution order:
+ *  - the process exits            -> `{ kind: 'exited', exitCode, ... }`
+ *  - `ready(output)` becomes true -> `{ kind: 'running', pid }` immediately
+ *    (used to detach the instant we see a "Local: http://..." server banner)
+ *  - the process has been alive `minRunMs` AND output has been idle `idleMs`
+ *                                 -> `{ kind: 'running', pid }` (quiet loops,
+ *    e.g. a game window with no console output)
+ *  - `timeoutMs` elapses while still chatty -> kill + `{ kind: 'exited' }`
+ *
+ * On hand-off the child is detached (its own process group) and unref'd so it
+ * outlives the caller, exactly like {@link execBackground}.
+ */
+export function execForeground(
+  cmd: string,
+  args: string[],
+  opts: ExecOptions & {
+    /** Detach after output is idle this long once eligible (default 6000ms). */
+    idleMs?: number;
+    /** Don't detach before the process has run at least this long (default 2500ms). */
+    minRunMs?: number;
+    /** Predicate on combined output; returning true detaches immediately. */
+    ready?: (combined: string) => boolean;
+  } = {},
+): Promise<ForegroundOutcome> {
+  return new Promise((resolve, reject) => {
+    const start = performance.now();
+    const child = spawn(cmd, args, {
+      cwd: opts.cwd,
+      env: { ...process.env, ...opts.env },
+      stdio: ['ignore', 'pipe', 'pipe'],
+      detached: true,
+    });
+
+    let stdout = '';
+    let stderr = '';
+    let combined = '';
+    let done = false;
+    let killed = false;
+    let aborted = false;
+    let eligible = false;
+    let killEscalation: NodeJS.Timeout | null = null;
+    let idleTimer: NodeJS.Timeout | null = null;
+
+    const idleMs = opts.idleMs ?? 6_000;
+    const minRunMs = opts.minRunMs ?? 2_500;
+    const KILL_GRACE_MS = 2_000;
+
+    const clearTimers = (): void => {
+      if (timeout) clearTimeout(timeout);
+      if (killEscalation) clearTimeout(killEscalation);
+      if (idleTimer) clearTimeout(idleTimer);
+      clearTimeout(minRunTimer);
+      if (opts.signal) opts.signal.removeEventListener('abort', onAbort);
+    };
+
+    const handoff = (): void => {
+      if (done) return;
+      done = true;
+      clearTimers();
+      child.unref();
+      resolve({ kind: 'running', pid: child.pid ?? -1, output: combined, durationMs: performance.now() - start });
+    };
+
+    const bumpIdle = (): void => {
+      if (idleTimer) clearTimeout(idleTimer);
+      if (!eligible || done) return;
+      idleTimer = setTimeout(handoff, idleMs);
+    };
+
+    const minRunTimer = setTimeout(() => {
+      eligible = true;
+      bumpIdle();
+    }, minRunMs);
+
+    const escalateKill = (reason: 'abort' | 'timeout'): void => {
+      if (reason === 'abort') aborted = true;
+      else killed = true;
+      try {
+        if (child.pid) process.kill(-child.pid, 'SIGTERM');
+        else child.kill('SIGTERM');
+      } catch {
+        // already exited
+      }
+      killEscalation = setTimeout(() => {
+        try {
+          if (child.pid) process.kill(-child.pid, 'SIGKILL');
+        } catch {
+          // ignore
+        }
+      }, KILL_GRACE_MS);
+    };
+
+    const timeout = opts.timeoutMs ? setTimeout(() => escalateKill('timeout'), opts.timeoutMs) : null;
+    const onAbort = (): void => escalateKill('abort');
+    if (opts.signal) {
+      if (opts.signal.aborted) onAbort();
+      else opts.signal.addEventListener('abort', onAbort, { once: true });
+    }
+
+    const onData = (s: string, isErr: boolean): void => {
+      if (isErr) stderr += s;
+      else stdout += s;
+      combined += s;
+      (isErr ? opts.onStderr : opts.onStdout)?.(s);
+      if (!done && opts.ready?.(combined)) {
+        handoff();
+        return;
+      }
+      bumpIdle();
+    };
+    child.stdout.on('data', (c: Buffer) => onData(c.toString('utf8'), false));
+    child.stderr.on('data', (c: Buffer) => onData(c.toString('utf8'), true));
+
+    child.on('error', (err: Error) => {
+      if (done) return;
+      done = true;
+      clearTimers();
+      reject(err);
+    });
+
+    child.on('close', (code: number | null, signal: NodeJS.Signals | null) => {
+      if (done) return;
+      done = true;
+      clearTimers();
+      if (aborted) {
+        const err = new Error('aborted');
+        err.name = 'AbortError';
+        reject(err);
+        return;
+      }
+      const exitCode = code ?? (signal ? 128 : -1);
+      resolve({
+        kind: 'exited',
+        stdout,
+        stderr: killed ? `${stderr}\n[killed after ${opts.timeoutMs}ms]` : stderr,
+        exitCode,
+        durationMs: performance.now() - start,
+      });
+    });
+  });
+}
+
 export type BackgroundHandle = {
   pid: number;
   /** Combined stdout+stderr captured so far (bounded to `maxBuffer`). */

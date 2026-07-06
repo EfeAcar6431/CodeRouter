@@ -126,6 +126,19 @@ export function SettingsPage(): React.ReactElement {
         <RunModeSetting mode={data.runMode} onChange={(v) => api.setRunMode(v).then(refresh)} />
       </Section>
 
+      <Section title="Preview">
+        <PreviewInApp
+          enabled={data.previewInApp}
+          onChange={(v) =>
+            api.setPreviewInApp(v).then(() => {
+              // Let the app shell switch preview routing live (no reload).
+              window.dispatchEvent(new CustomEvent('cr:preview-in-app', { detail: { previewInApp: v } }));
+              return refresh();
+            })
+          }
+        />
+      </Section>
+
       <Section title="Spending limit">
         <SpendingLimit current={data.limits.monthlyUsd} onSave={(v) => api.setLimit(v).then(refresh)} />
       </Section>
@@ -198,6 +211,48 @@ function AutoApply({ enabled, onChange }: { enabled: boolean; onChange: (v: bool
           enabled ? 'bg-accent' : 'bg-panel2 border border-border',
         )}
         title={enabled ? 'Turn off auto-accept' : 'Turn on auto-accept'}
+      >
+        <span
+          className={cls(
+            'absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform',
+            enabled ? 'left-0.5 translate-x-5' : 'left-0.5',
+          )}
+        />
+      </button>
+    </div>
+  );
+}
+
+function PreviewInApp({ enabled, onChange }: { enabled: boolean; onChange: (v: boolean) => Promise<unknown> }): React.ReactElement {
+  const [saving, setSaving] = useState(false);
+  const toggle = async (next: boolean): Promise<void> => {
+    setSaving(true);
+    try {
+      await onChange(next);
+    } finally {
+      setSaving(false);
+    }
+  };
+  return (
+    <div className="card flex items-center gap-3">
+      <div className="flex-1">
+        <div className="font-medium">Open previews in the built-in browser</div>
+        <div className="text-xs text-muted">
+          {enabled
+            ? "When the agent opens a page or dev server, it shows in CodeRouter's browser panel. CLI runs route to this window when it's open."
+            : 'Previews open in your system default browser instead.'}
+        </div>
+      </div>
+      <button
+        role="switch"
+        aria-checked={enabled}
+        disabled={saving}
+        onClick={() => void toggle(!enabled)}
+        className={cls(
+          'relative h-6 w-11 shrink-0 rounded-full transition-colors disabled:opacity-60',
+          enabled ? 'bg-accent' : 'bg-panel2 border border-border',
+        )}
+        title={enabled ? 'Use the system browser instead' : 'Use the built-in browser'}
       >
         <span
           className={cls(

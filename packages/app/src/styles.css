@@ -6,12 +6,14 @@
    modifiers (e.g. bg-accent/20) keep working. Dark is the default; the
    `.light` class on <html> swaps the palette. */
 :root {
-  --c-bg: 11 13 18;
-  --c-panel: 18 21 28;
-  --c-panel2: 23 27 36;
-  --c-border: 35 42 54;
-  --c-muted: 139 147 167;
-  --c-text: 230 233 240;
+  /* Neutral near-black palette (Codex / Claude style): flat dark greys with
+     no blue cast. Channels stay near-equal so nothing reads as navy. */
+  --c-bg: 9 9 10;
+  --c-panel: 20 20 22;
+  --c-panel2: 28 28 31;
+  --c-border: 41 41 45;
+  --c-muted: 143 143 150;
+  --c-text: 236 236 238;
   --c-accent: 57 211 83;
   --c-ok: 63 185 80;
   --c-warn: 210 153 34;

@@ -1,11 +1,13 @@
 import React, { useEffect, useState } from 'react';
 import { api, type Breakdown, type UsageReport } from '../lib/api';
 import { Heatmap } from '../components/Heatmap';
+import { DayDetail } from '../components/DayDetail';
 import { Section, Spinner, money, timeAgo } from '../components/common';
 import { ModelBadges } from '../components/ModelBadges';
 
 export function UsagePage(): React.ReactElement {
   const [data, setData] = useState<UsageReport | null>(null);
+  const [selectedDate, setSelectedDate] = useState<string | null>(null);
   useEffect(() => {
     void api.usage().then(setData).catch(() => {});
   }, []);
@@ -26,7 +28,21 @@ export function UsagePage(): React.ReactElement {
 
       <Section title="Activity">
         <div className="card">
-          <Heatmap days={data.heatmap} />
+          <Heatmap
+            days={data.heatmap}
+            selectedDate={selectedDate}
+            onSelect={(d) => setSelectedDate((cur) => (cur === d ? null : d))}
+          />
+          {selectedDate ? (
+            <DayDetail
+              date={selectedDate}
+              day={data.heatmap.find((x) => x.date === selectedDate)}
+              runs={data.recentRuns}
+              onClear={() => setSelectedDate(null)}
+            />
+          ) : (
+            <div className="mt-3 text-xs text-muted/70">Click a day to see that day's chats and cost.</div>
+          )}
         </div>
       </Section>
 

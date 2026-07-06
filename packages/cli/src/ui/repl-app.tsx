@@ -55,6 +55,7 @@ import {
   SETUP_PROVIDERS,
   type SetupProvider,
   detectConfiguredProviders,
+  getPreviewInApp,
   loadCredentialsIntoEnv,
   removeCredential,
   saveCredential,
@@ -122,6 +123,34 @@ function openBrowser(url: string): void {
   } catch {
     // The URL is already printed; the user can open it manually.
   }
+}
+
+/**
+ * Honor the preview-in-app preference for an `open_preview` from a CLI run.
+ * When on, try to route the URL to a running CodeRouter Studio (via the
+ * daemon broadcast); if no app is listening (or the pref is off), fall back
+ * to the OS default browser so the user always sees the result.
+ */
+async function routePreview(url: string, cwd: string): Promise<void> {
+  if (!getPreviewInApp()) {
+    openBrowser(url);
+    return;
+  }
+  try {
+    const daemon = await ensureDaemon({ cwd });
+    const res = await fetch(`http://127.0.0.1:${daemon.port}/api/preview/app`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ url }),
+    });
+    if (res.ok) {
+      const body = (await res.json()) as { delivered?: number };
+      if ((body.delivered ?? 0) > 0) return; // Studio is showing it in-app.
+    }
+  } catch {
+    // daemon unreachable — fall through to the external browser
+  }
+  openBrowser(url);
 }
 
 /**
@@ -712,6 +741,22 @@ function App({ cwd, initialMode }: AppProps): React.ReactElement {
           kind: 'tool',
           tool: 'bash',
           description: `Started ${event.command}${event.url ? ` — ${event.url}` : ''}`,
+          routeLabel,
+        },
+      ];
+    } else if (event.kind === 'open_preview') {
+      // Route to CodeRouter Studio's built-in browser when the preview-in-app
+      // pref is on and the app is running; otherwise open the OS browser.
+      const inApp = getPreviewInApp();
+      void routePreview(event.url, cwd);
+      liveLogRef.current = [
+        ...log,
+        {
+          id: logIdRef.current++,
+          kind: 'tool',
+          tool: 'open_preview',
+          description: `Opened ${event.url}${inApp ? ' in CodeRouter Studio (or your browser)' : ' in your browser'}`,
+          ok: true,
           routeLabel,
         },
       ];

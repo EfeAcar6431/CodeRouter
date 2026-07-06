@@ -17,6 +17,7 @@ import { globTool } from './glob.js';
 import { grepTool } from './grep.js';
 import { listDirTool } from './listDir.js';
 import { multiEditTool } from './multiEdit.js';
+import { openPreviewTool } from './openPreview.js';
 import { readFileTool } from './readFile.js';
 import { webSearchTool } from './webSearch.js';
 import { writeFileTool } from './writeFile.js';
@@ -37,6 +38,7 @@ export function defaultTools(): Tool[] {
     editFileTool,
     multiEditTool,
     bashTool,
+    openPreviewTool,
     askUserQuestionTool,
   ];
 }
@@ -59,6 +61,7 @@ export {
   grepTool,
   listDirTool,
   multiEditTool,
+  openPreviewTool,
   readFileTool,
   webSearchTool,
   writeFileTool,

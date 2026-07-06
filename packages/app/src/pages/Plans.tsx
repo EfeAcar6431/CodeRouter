@@ -41,6 +41,26 @@ function extractOpenQuestions(body: string): string[] {
 export type PlanSelection = { id: string; nonce: number } | null;
 
 /**
+ * Compact "has this plan been built?" pill. A plan starts `draft`/`ready`
+ * (not built), flips to `executing` once the user kicks off a build, and to
+ * `done` when every phase is checked off (or the run reports completion).
+ */
+function BuildBadge({ status }: { status: string }): React.ReactElement {
+  const map: Record<string, { label: string; cls: string; dot?: boolean }> = {
+    done: { label: 'Built', cls: 'border-ok/40 bg-ok/10 text-ok' },
+    executing: { label: 'Building', cls: 'border-accent/40 bg-accent/10 text-accent', dot: true },
+    failed: { label: 'Failed', cls: 'border-bad/40 bg-bad/10 text-bad' },
+  };
+  const m = map[status] ?? { label: 'Not built', cls: 'border-border bg-panel2 text-muted' };
+  return (
+    <span className={cls('inline-flex items-center gap-1 rounded-full border px-1.5 py-[1px] text-[10px] font-medium', m.cls)}>
+      {m.dot && <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-accent" />}
+      {m.label}
+    </span>
+  );
+}
+
+/**
  * Plan workspace: a full-window view over the plans saved under
  * `.coderouter/plans/*.plan.md`. Left rail lists plans; the main pane
  * renders the selected plan as a rich document with a phase checklist,
@@ -130,11 +150,31 @@ export function PlansPage({
     const next = detail.frontmatter.phases.map((p) =>
       p.id === phase.id ? { ...p, status: p.status === 'done' ? 'pending' : 'done' } : p,
     ) as PlanPhase[];
-    setDetail({ ...detail, frontmatter: { ...detail.frontmatter, phases: next } });
+    // Reflect completion in the plan's build status: all phases done => Built,
+    // otherwise keep it as an in-progress build (unless it was still a draft).
+    const allDone = next.length > 0 && next.every((p) => p.status === 'done');
+    const cur = detail.frontmatter.status;
+    const nextStatus = allDone ? 'done' : cur === 'done' ? 'executing' : cur;
+    setDetail({ ...detail, frontmatter: { ...detail.frontmatter, phases: next, status: nextStatus } });
     try {
-      await api.savePlan({ cwd: project, id: detail.frontmatter.planId, phases: next });
+      await api.savePlan({ cwd: project, id: detail.frontmatter.planId, phases: next, status: nextStatus });
+      void refresh();
     } catch {
       void refresh();
+    }
+  };
+
+  // Kick off a build: mark the plan as building so the list shows its state,
+  // then hand the body to an agent-mode chat.
+  const startBuild = (): void => {
+    if (!detail) return;
+    onStartBuild(detail.frontmatter.planId, detail.body);
+    if (project && detail.frontmatter.status !== 'done') {
+      setDetail({ ...detail, frontmatter: { ...detail.frontmatter, status: 'executing' } });
+      void api
+        .savePlan({ cwd: project, id: detail.frontmatter.planId, status: 'executing' })
+        .then(() => refresh())
+        .catch(() => {});
     }
   };
 
@@ -182,6 +222,7 @@ export function PlansPage({
                     <FileText className="h-3.5 w-3.5 shrink-0 text-sky-400" strokeWidth={2} />
                   )}
                   <span className="truncate text-[13px] font-medium text-text">{p.title}</span>
+                  <span className="ml-auto shrink-0"><BuildBadge status={p.status} /></span>
                 </div>
                 <div className="flex items-center gap-2 text-[11px] text-muted">
                   <span className="uppercase tracking-wide">{p.mode}</span>
@@ -225,7 +266,7 @@ export function PlansPage({
                   <BookOpen className="h-4 w-4" strokeWidth={2} /> Refine
                 </button>
                 <button
-                  onClick={() => onStartBuild(detail.frontmatter.planId, detail.body)}
+                  onClick={startBuild}
                   className="flex items-center gap-1.5 rounded-md bg-accent px-3 py-1.5 text-sm font-medium text-white transition-opacity hover:opacity-90"
                   title="Execute this plan in an Agent-mode chat"
                 >

@@ -163,6 +163,7 @@ export const api = {
   setLimit: (monthlyUsd: number | null) => req('POST', '/api/settings/limit', { monthlyUsd }),
   setAutoApply: (enabled: boolean) => req<{ ok: boolean; autoApply: boolean }>('POST', '/api/settings/auto-apply', { enabled }),
   setRunMode: (runMode: RunMode) => req<{ ok: boolean; runMode: RunMode }>('POST', '/api/settings/run-mode', { runMode }),
+  setPreviewInApp: (enabled: boolean) => req<{ ok: boolean; previewInApp: boolean }>('POST', '/api/settings/preview-in-app', { enabled }),
   setPreferred: (tier: string, provider: string | null, model: string | null) =>
     req('POST', '/api/settings/preferred-model', { tier, provider, model }),
 
@@ -341,9 +342,15 @@ export async function execCommand(
  */
 export type PlanOpenEvent = { type: 'plan-open'; cwd: string; planId: string; refine?: boolean; at: number };
 
+/**
+ * CLI -> app handoff signal: open `url` in Studio's built-in browser. Sent
+ * when a CLI-run agent calls open_preview and the preview-in-app pref is on.
+ */
+export type PreviewOpenEvent = { type: 'preview-open'; url: string; at: number };
+
 /** Subscribe to live loop events over SSE. Returns an unsubscribe fn. */
 export async function subscribeLoopEvents(
-  onEvent: (e: LoopEvent | { type: 'hello' } | PlanOpenEvent) => void,
+  onEvent: (e: LoopEvent | { type: 'hello' } | PlanOpenEvent | PreviewOpenEvent) => void,
 ): Promise<() => void> {
   const base = await resolveBase();
   const es = new EventSource(`${base}/api/loops/events`);
@@ -374,7 +381,7 @@ export type PresetInfo = { id: string; label: string; description: string; limit
 export type DiscoveredCommand = { kind: string; command: string; source: string };
 
 export type Breakdown = { key: string; label: string; runs: number; tokens: number; costUsd: number };
-export type HeatmapDay = { date: string; runs: number; tokens: number };
+export type HeatmapDay = { date: string; runs: number; tokens: number; costUsd: number };
 export type RecentRun = {
   id: string;
   createdAt: number;
@@ -428,6 +435,7 @@ export type SettingsReport = {
   limits: { monthlyUsd: number | null };
   autoApply: boolean;
   runMode: RunMode;
+  previewInApp: boolean;
   preferredModels: { strong: { provider: string; model: string } | null; cheap: { provider: string; model: string } | null };
   availableModels: AvailableModel[];
   paths: { credentials: string; db: string };

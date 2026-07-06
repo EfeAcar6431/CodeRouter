@@ -35,6 +35,7 @@ import {
   SETUP_PROVIDERS,
   getAutoApply,
   getPreferredModels,
+  getPreviewInApp,
   getRunMode,
   getSpendingLimit,
   type SetupProvider,
@@ -71,6 +72,7 @@ export type HeatmapDay = {
   date: string;
   runs: number;
   tokens: number;
+  costUsd: number;
 };
 
 export type RecentRun = {
@@ -157,6 +159,8 @@ export type SettingsReport = {
   autoApply: boolean;
   /** How the agent executes commands + edits. */
   runMode: RunMode;
+  /** Whether previews open in Studio's built-in browser (vs. the OS browser). */
+  previewInApp: boolean;
   preferredModels: {
     strong: { provider: string; model: string } | null;
     cheap: { provider: string; model: string } | null;
@@ -448,6 +452,7 @@ export function buildSettingsReport(cwd: string): SettingsReport {
     limits: getSpendingLimit(),
     autoApply: getAutoApply(),
     runMode: getRunMode(),
+    previewInApp: getPreviewInApp(),
     preferredModels: getPreferredModels(),
     availableModels: listAvailableModels(),
     paths: { credentials: CREDENTIALS_PATH, db: resolveDbPath(cwd) },
@@ -582,12 +587,13 @@ function groupBy(
 }
 
 function computeHeatmap(runs: RunRecord[], now: number): HeatmapDay[] {
-  const byDate = new Map<string, { runs: number; tokens: number }>();
+  const byDate = new Map<string, { runs: number; tokens: number; costUsd: number }>();
   for (const r of runs) {
     const date = localDateKey(r.createdAt);
-    const cur = byDate.get(date) ?? { runs: 0, tokens: 0 };
+    const cur = byDate.get(date) ?? { runs: 0, tokens: 0, costUsd: 0 };
     cur.runs += 1;
     cur.tokens += r.tokensIn + r.tokensOut;
+    cur.costUsd += r.costUsd;
     byDate.set(date, cur);
   }
   const out: HeatmapDay[] = [];
@@ -599,7 +605,7 @@ function computeHeatmap(runs: RunRecord[], now: number): HeatmapDay[] {
     d.setDate(start.getDate() + i);
     const key = localDateKey(d.getTime());
     const hit = byDate.get(key);
-    out.push({ date: key, runs: hit?.runs ?? 0, tokens: hit?.tokens ?? 0 });
+    out.push({ date: key, runs: hit?.runs ?? 0, tokens: hit?.tokens ?? 0, costUsd: hit?.costUsd ?? 0 });
   }
   return out;
 }

@@ -70,6 +70,13 @@ type CredentialsFile = {
    */
   runMode?: RunMode;
   /**
+   * Where `open_preview` shows a URL / page. When true (default), it opens
+   * in CodeRouter Studio's built-in browser panel - and CLI previews are
+   * routed to a running Studio instance when one is connected. When false,
+   * previews open in the OS default browser instead. Stored globally.
+   */
+  previewInApp?: boolean;
+  /**
    * User's preferred models per tier. When set, routing leans on these
    * instead of the catalog default: `strong` is used for high-effort
    * intents (deep reasoning, multi-file, huge context), `cheap` for
@@ -270,6 +277,37 @@ export function setAutoApply(enabled: boolean): void {
     // file doesn't exist or is malformed - rewrite from scratch
   }
   existing.autoApply = enabled === true;
+  mkdirSync(dirname(CREDENTIALS_PATH), { recursive: true });
+  writeFileSync(CREDENTIALS_PATH, `${JSON.stringify(existing, null, 2)}\n`, { encoding: 'utf8' });
+  try {
+    chmodSync(CREDENTIALS_PATH, 0o600);
+  } catch {
+    // permissions are best-effort (e.g. on Windows)
+  }
+}
+
+/**
+ * Whether previews open in CodeRouter Studio's built-in browser (default)
+ * or the OS default browser. A malformed/absent value defaults to `true`.
+ */
+export function getPreviewInApp(): boolean {
+  try {
+    const file = JSON.parse(readFileSync(CREDENTIALS_PATH, 'utf8')) as CredentialsFile;
+    return file.previewInApp !== false;
+  } catch {
+    return true;
+  }
+}
+
+/** Persist the preview-target preference. */
+export function setPreviewInApp(enabled: boolean): void {
+  let existing: CredentialsFile = {};
+  try {
+    existing = JSON.parse(readFileSync(CREDENTIALS_PATH, 'utf8')) as CredentialsFile;
+  } catch {
+    // file doesn't exist or is malformed - rewrite from scratch
+  }
+  existing.previewInApp = enabled === true;
   mkdirSync(dirname(CREDENTIALS_PATH), { recursive: true });
   writeFileSync(CREDENTIALS_PATH, `${JSON.stringify(existing, null, 2)}\n`, { encoding: 'utf8' });
   try {

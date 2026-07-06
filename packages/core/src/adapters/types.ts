@@ -80,6 +80,15 @@ export type ActivityEvent =
       toolUseId?: string;
     }
   /**
+   * The agent explicitly asked to show the user something in a browser -
+   * a running dev server, or a standalone web page / game / HTML file it
+   * produced. `url` is either an `http(s)://` address or a `file://` URL.
+   * The desktop app opens it in the in-app browser panel; the CLI launches
+   * the OS default browser. This is the deliberate "show it to me" signal,
+   * distinct from `process_started` (which merely reports a spawned pid).
+   */
+  | { kind: 'open_preview'; url: string; toolUseId?: string }
+  /**
    * Reasoning / thinking summary. Codex emits these between agent
    * messages; Claude Code rarely surfaces them directly. Optional -
    * the REPL may dim or hide them entirely depending on verbosity.

@@ -70,6 +70,27 @@ describe('worktree', () => {
     await destroyWorktree(wt);
   });
 
+  it('emits applyable binary patches for new image files', async () => {
+    const wt = await createWorktree({ repoPath });
+    // Minimal valid 1x1 PNG.
+    const png = Buffer.from(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+      'base64',
+    );
+    await writeFile(join(wt.path, 'logo.png'), png);
+    const patch = await diffWorktree(wt);
+    expect(patch).toContain('logo.png');
+    // Without --binary git emits "Binary files ... differ" with no
+    // payload; with --binary we get a literal GIT binary patch.
+    expect(patch).toMatch(/GIT binary patch|literal /);
+    expect(patch).not.toMatch(/Binary files .* differ/);
+
+    const files = await mergeWorktree(wt);
+    expect(files).toContain('logo.png');
+    const applied = await readFile(join(repoPath, 'logo.png'));
+    expect(Buffer.compare(applied, png)).toBe(0);
+  });
+
   it('merges changes back into the host repo via apply', async () => {
     const wt = await createWorktree({ repoPath });
     await writeFile(join(wt.path, 'src.ts'), "export const x = 42;\n");

@@ -311,8 +311,12 @@ export async function diffWorktree(wt: Worktree): Promise<string> {
   // Force untracked files to appear in the diff.
   await git(['add', '-N', '.'], { cwd: wt.path });
 
+  // `--binary` is required: without it, git emits a "Binary files
+  // differ" stub with no payload, and `git apply` later fails with
+  // "cannot apply binary patch ... without full index line". Logo
+  // PNGs / preview assets then can't be accepted from the REPL.
   const result = await git(
-    ['diff', '--patch', wt.baseSha, '--', '.', ...DIFF_EXCLUDES],
+    ['diff', '--patch', '--binary', wt.baseSha, '--', '.', ...DIFF_EXCLUDES],
     { cwd: wt.path },
   );
   if (result.exitCode !== 0) {
@@ -383,9 +387,10 @@ export async function diffWorkingTree(
   baseTree: string,
 ): Promise<{ diff: string; files: string[] }> {
   const afterTree = await snapshotWorkingTree(repoPath);
-  const patch = await git(['diff', '--patch', baseTree, afterTree, '--', '.', ...DIFF_EXCLUDES], {
-    cwd: repoPath,
-  });
+  const patch = await git(
+    ['diff', '--patch', '--binary', baseTree, afterTree, '--', '.', ...DIFF_EXCLUDES],
+    { cwd: repoPath },
+  );
   const names = await git(['diff', '--name-only', baseTree, afterTree, '--', '.', ...DIFF_EXCLUDES], {
     cwd: repoPath,
   });

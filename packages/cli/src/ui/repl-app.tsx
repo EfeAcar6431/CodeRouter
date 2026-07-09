@@ -364,11 +364,6 @@ function App({ cwd, initialMode }: AppProps): React.ReactElement {
   // take a couple of seconds to actually exit even with SIGTERM, and
   // that lag was reading as "ESC did nothing".
   const [aborting, setAborting] = useState(false);
-  // Animated spinner index + elapsed-time counter for the in-flight
-  // progress line. Both update on intervals while `busy` is true and
-  // are reset between runs.
-  const [spinFrame, setSpinFrame] = useState(0);
-  const [elapsedMs, setElapsedMs] = useState(0);
   // Tracks the in-flight AbortController so esc-while-busy can cancel
   // the run. Held in a ref so updates don't re-render the spinner.
   const abortRef = useRef<AbortController | null>(null);
@@ -438,25 +433,6 @@ function App({ cwd, initialMode }: AppProps): React.ReactElement {
     tokensOut: number;
     costUsd: number;
   }>({ tokensIn: 0, tokensOut: 0, costUsd: 0 });
-
-  useEffect(() => {
-    if (!busy) {
-      setSpinFrame(0);
-      setElapsedMs(0);
-      return;
-    }
-    const start = Date.now();
-    const spinId = setInterval(() => {
-      setSpinFrame((f) => (f + 1) % SPINNER_FRAMES.length);
-    }, 80);
-    const timeId = setInterval(() => {
-      setElapsedMs(Date.now() - start);
-    }, 200);
-    return () => {
-      clearInterval(spinId);
-      clearInterval(timeId);
-    };
-  }, [busy]);
 
   // Has the user trusted this directory? Persisted across sessions
   // in `~/.coderouter/trust.json`. When false on launch we open the
@@ -2324,9 +2300,7 @@ function App({ cwd, initialMode }: AppProps): React.ReactElement {
       {busy && (
         <Box flexDirection="column" marginBottom={1}>
           <ProgressLine
-            frame={spinFrame}
             phase={aborting ? 'aborting…' : phase}
-            elapsedMs={elapsedMs}
             routeLabel={formatRouteLabel(currentRoute) ?? undefined}
             usage={runningUsage}
             aborting={aborting}
@@ -3332,20 +3306,37 @@ function StatusRow({
 }
 
 function ProgressLine({
-  frame,
   phase,
-  elapsedMs,
   routeLabel,
   usage,
   aborting,
 }: {
-  frame: number;
   phase: string;
-  elapsedMs: number;
   routeLabel?: string;
   usage?: { tokensIn: number; tokensOut: number };
   aborting?: boolean;
 }): React.ReactElement {
+  // Spinner + elapsed timers live HERE, not in App. Previously App
+  // re-rendered ~12×/sec on every spin/elapsed tick, which forced Ink
+  // to redraw the entire live log + Static region and made the
+  // wordmark flash. Isolating the animation to this leaf keeps the
+  // rest of the tree stable while the run is in flight.
+  const [frame, setFrame] = useState(0);
+  const [elapsedMs, setElapsedMs] = useState(0);
+  useEffect(() => {
+    const start = Date.now();
+    const spinId = setInterval(() => {
+      setFrame((f) => (f + 1) % SPINNER_FRAMES.length);
+    }, 80);
+    const timeId = setInterval(() => {
+      setElapsedMs(Date.now() - start);
+    }, 200);
+    return () => {
+      clearInterval(spinId);
+      clearInterval(timeId);
+    };
+  }, []);
+
   // Single dim line sitting directly under the input box. Mirrors the
   // Claude Code spinner: rotating braille frame + a verb + an elapsed
   // counter that ticks up while the run is in flight, plus optional

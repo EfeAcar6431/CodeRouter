@@ -312,4 +312,17 @@ export const CATALOG: Catalog = [
       { intent: 'fast-cheap', rank: 3 },
     ],
   },
+  {
+    // Cheap tools-capable agent for creative / visual tasks (logo, icon)
+    // that need generate_image + light file edits — not a frontier coder.
+    provider: 'openrouter_agent',
+    model: 'anthropic/claude-3-5-haiku',
+    contextWindow: 200_000,
+    pricePer1MIn: 0.8,
+    pricePer1MOut: 4,
+    capabilities: { tooluse: true },
+    intents: [
+      { intent: 'fast-cheap', rank: 2 },
+    ],
+  },
 ];

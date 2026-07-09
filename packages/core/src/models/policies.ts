@@ -152,6 +152,21 @@ export function routingPolicy(
   return policy('code-edit', 'balanced-agent', 'strong', 'value', WEIGHTS.balanced, `balanced default (taskType=${taskType})`);
 }
 
+/**
+ * Policy for creative / visual tasks (logo, icon, image generation).
+ * Cheap tools-capable agent + `generate_image` tool — never frontier.
+ */
+export function creativeTaskPolicy(): RoutingPolicy {
+  return policy(
+    'creative-visual',
+    'fast-cheap',
+    'mid',
+    'cost',
+    WEIGHTS.balanced,
+    'creative/visual task: cheap agent + generate_image',
+  );
+}
+
 function policy(
   name: string,
   intent: Intent,

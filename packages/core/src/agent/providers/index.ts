@@ -5,6 +5,7 @@ export {
   listOpenRouterToolCapableModels,
   isToolCapable,
   isVisionCapable,
+  isImageOutputCapable,
   pricePer1MIn,
   pricePer1MOut,
 } from './openrouter.js';

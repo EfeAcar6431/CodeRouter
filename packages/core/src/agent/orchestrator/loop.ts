@@ -28,6 +28,73 @@ import { checkBudget, resolveBudget } from './budget.js';
 import { parseTextualToolCalls } from './toolParse.js';
 import { imageToDataUrl } from '../../context/images.js';
 
+/** Soft cap on a single tool result stored in the transcript (bytes). */
+const MAX_TOOL_RESULT_BYTES = 16 * 1024;
+/** Rough chars/token for mid-loop condensation trigger. */
+const CHARS_PER_TOKEN = 4;
+/** Fraction of a 128k window that triggers mid-loop condensation. */
+const CONDENSE_FRACTION = 0.55;
+const CONDENSE_KEEP_RECENT = 12;
+
+function clipToolBody(body: string): string {
+  const buf = Buffer.from(body, 'utf8');
+  if (buf.byteLength <= MAX_TOOL_RESULT_BYTES) return body;
+  return `${buf.subarray(0, MAX_TOOL_RESULT_BYTES).toString('utf8')}\n\n[truncated: tool result exceeded ${MAX_TOOL_RESULT_BYTES} bytes]`;
+}
+
+function approxTokens(messages: ChatMessage[]): number {
+  let chars = 0;
+  for (const m of messages) {
+    if (m.role === 'assistant') {
+      chars += (m.content ?? '').length;
+      for (const tc of m.tool_calls ?? []) {
+        chars += tc.function.name.length + (tc.function.arguments?.length ?? 0);
+      }
+    } else if (m.role === 'tool') {
+      chars += m.content.length;
+    } else if (m.role === 'system' || m.role === 'user') {
+      const c = m.content;
+      if (typeof c === 'string') chars += c.length;
+      else if (Array.isArray(c)) {
+        for (const b of c) {
+          if (b.type === 'text') chars += b.text.length;
+          else chars += 200; // image placeholder
+        }
+      }
+    }
+  }
+  return Math.ceil(chars / CHARS_PER_TOKEN);
+}
+
+/**
+ * Drop older tool-result bodies when the transcript is getting large.
+ * Keeps recent messages intact so the model can continue the current
+ * step; older tool dumps become one-line stubs. This is the main
+ * defense against multi-million-token sessions from re-sending every
+ * file read on every iteration.
+ */
+function condenseInPlace(messages: ChatMessage[]): void {
+  if (messages.length <= CONDENSE_KEEP_RECENT + 2) return;
+  if (approxTokens(messages) < Math.floor(128_000 * CONDENSE_FRACTION)) return;
+
+  const cutoff = messages.length - CONDENSE_KEEP_RECENT;
+  for (let i = 1; i < cutoff; i++) {
+    // index 0 is the system prompt — never touch it
+    const m = messages[i]!;
+    if (m.role === 'tool' && m.content.length > 200) {
+      messages[i] = {
+        ...m,
+        content: `${m.content.slice(0, 120)}… [earlier tool result condensed]`,
+      };
+    } else if (m.role === 'assistant' && typeof m.content === 'string' && m.content.length > 800) {
+      messages[i] = {
+        ...m,
+        content: `${m.content.slice(0, 400)}… [earlier narration condensed]`,
+      };
+    }
+  }
+}
+
 export async function runAgent(input: AgentRunInput): Promise<AgentRunResult> {
   const startMs = performance.now();
   const budget = resolveBudget(input.budget);
@@ -83,6 +150,7 @@ export async function runAgent(input: AgentRunInput): Promise<AgentRunResult> {
     }
 
     iterations++;
+    condenseInPlace(messages);
 
     // Build the onDelta bridge: content deltas -> onChunk, reasoning
     // deltas -> onReasoning. When streaming, we fire these live; the
@@ -251,7 +319,7 @@ async function executeToolCalls(opts: {
           : undefined,
       });
       const ok = result.ok ?? true;
-      messages.push({ role: 'tool', tool_call_id: tc.id, content: result.body });
+      messages.push({ role: 'tool', tool_call_id: tc.id, content: clipToolBody(result.body) });
       input.onActivity?.({
         kind: 'tool_result',
         tool: tc.function.name,

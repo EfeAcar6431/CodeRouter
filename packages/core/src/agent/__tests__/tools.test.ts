@@ -57,6 +57,7 @@ describe('default tool registry', () => {
       'write_file',
       'edit_file',
       'multi_edit',
+      'generate_image',
       'bash',
       'open_preview',
       'ask_user_question',

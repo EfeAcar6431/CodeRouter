@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Classification } from '../types.js';
-import { estimateDifficulty } from './difficulty.js';
+import { estimateDifficulty, isCreativeTask } from './difficulty.js';
 
 function classification(
   partial: Partial<Classification> & { taskType: Classification['taskType'] },
@@ -21,6 +21,21 @@ function classification(
     ...partial,
   };
 }
+
+describe('isCreativeTask', () => {
+  it('detects logo / icon / image-generation prompts', () => {
+    expect(isCreativeTask('generate a new logo for CodeRouter')).toBe(true);
+    expect(isCreativeTask('redesign the app icon')).toBe(true);
+    expect(isCreativeTask('make a favicon')).toBe(true);
+    expect(isCreativeTask('generate an image of a cat')).toBe(true);
+  });
+
+  it('does not flag ordinary coding prompts', () => {
+    expect(isCreativeTask('fix the login bug')).toBe(false);
+    expect(isCreativeTask('refactor the routing module')).toBe(false);
+    expect(isCreativeTask(undefined)).toBe(false);
+  });
+});
 
 describe('estimateDifficulty', () => {
   it('scores a trivial task as low', () => {

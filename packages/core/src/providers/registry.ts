@@ -443,6 +443,12 @@ export function defaultProviders(): ProviderConfig[] {
           contextWindow: 128_000,
           capabilities: { canEdit: true, tools: true },
         },
+        'anthropic/claude-3-5-haiku': {
+          pricePer1MIn: 0.8,
+          pricePer1MOut: 4,
+          contextWindow: 200_000,
+          capabilities: { canEdit: true, tools: true },
+        },
       },
     },
     {

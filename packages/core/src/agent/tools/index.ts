@@ -13,6 +13,7 @@ import type { Tool } from '../types.js';
 import { askUserQuestionTool } from './askUserQuestion.js';
 import { bashTool } from './bash.js';
 import { editFileTool } from './editFile.js';
+import { generateImageTool } from './generateImage.js';
 import { globTool } from './glob.js';
 import { grepTool } from './grep.js';
 import { listDirTool } from './listDir.js';
@@ -39,6 +40,7 @@ export function defaultTools(): Tool[] {
     writeFileTool,
     editFileTool,
     multiEditTool,
+    generateImageTool,
     bashTool,
     openPreviewTool,
     askUserQuestionTool,
@@ -59,6 +61,7 @@ export {
   askUserQuestionTool,
   bashTool,
   editFileTool,
+  generateImageTool,
   globTool,
   grepTool,
   listDirTool,

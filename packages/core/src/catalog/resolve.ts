@@ -216,17 +216,48 @@ function collectIntentCandidates(
   }
 
   // Expand dynamic providers with their full live catalog.
+  //
+  // Dedup by *canonical card id* so OpenRouter's floating aliases
+  // (`~anthropic/claude-opus-latest`, `anthropic/claude-opus-4.5`,
+  // `anthropic/claude-opus-4-5`, …) don't all enter the pool as
+  // separate candidates. Without this, the alias that happens to
+  // sort first (often `~…-latest`) wins every value race and the
+  // TUI looks like "we only ever run Opus". Prefer the curated
+  // catalog id when present; otherwise the cheapest live slug.
   if (dynamicForIntent.size > 0) {
     const live = registry.listOpenRouterCatalogModels();
+    const seenCard = new Set(candidates.map((c) => c.card.id));
     for (const dyn of dynamicForIntent.values()) {
+      // Group live models by the card they resolve to.
+      const byCard = new Map<string, { m: (typeof live)[number]; card: ReturnType<typeof resolveCard> }>();
       for (const m of live) {
+        // Skip OpenRouter's floating "~vendor/…" aliases — they
+        // resolve to the same card as the pinned id but pollute
+        // the route label and confuse users.
+        if (m.id.startsWith('~')) continue;
         if (forbidRoutes.has(`${dyn.name},${m.id}`)) continue;
         const card = resolveCard(m.id, m);
         if (dyn.requireTools && !card.tools) continue;
+        if (seenCard.has(card.id)) continue;
+        const prev = byCard.get(card.id);
+        if (!prev) {
+          byCard.set(card.id, { m, card });
+          continue;
+        }
+        // Prefer the curated/canonical id, then the cheaper slug.
+        const preferCanonical = m.id === card.id && prev.m.id !== card.id;
+        const cost = (card.pricePer1MIn ?? 0) + (card.pricePer1MOut ?? 0);
+        const prevCost = (prev.card.pricePer1MIn ?? 0) + (prev.card.pricePer1MOut ?? 0);
+        if (preferCanonical || (!preferCanonical && prev.m.id !== card.id && cost < prevCost)) {
+          byCard.set(card.id, { m, card });
+        }
+      }
+      for (const { m, card } of byCard.values()) {
+        seenCard.add(card.id);
         candidates.push({
           via: dyn.name,
           adapter: dyn.adapter,
-          model: m.id,
+          model: m.id === card.id ? card.id : m.id,
           card,
           pricePer1MIn: card.pricePer1MIn ?? 0,
           pricePer1MOut: card.pricePer1MOut ?? 0,

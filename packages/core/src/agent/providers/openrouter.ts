@@ -178,6 +178,15 @@ export function isVisionCapable(m: OpenRouterModel): boolean {
   return m.architecture?.input_modalities?.includes('image') === true;
 }
 
+/**
+ * Whether the model can *generate* images (output modality includes
+ * `image`). Distinct from {@link isVisionCapable}, which is about
+ * accepting images as input.
+ */
+export function isImageOutputCapable(m: OpenRouterModel): boolean {
+  return m.architecture?.output_modalities?.includes('image') === true;
+}
+
 /** USD per million prompt tokens, computed from OpenRouter's per-token string price. */
 export function pricePer1MIn(m: OpenRouterModel): number {
   return safePrice(m.pricing?.prompt) * 1_000_000;

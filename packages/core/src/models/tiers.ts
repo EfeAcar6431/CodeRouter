@@ -98,7 +98,9 @@ export type IntentDefaults = {
 export const INTENT_DEFAULTS: Record<Intent, IntentDefaults> = {
   'deep-reasoning': { floor: 'frontier', objective: 'quality', minContextWindow: 16_000 },
   'multi-file': { floor: 'frontier', objective: 'quality', minContextWindow: 60_000 },
-  'balanced-agent': { floor: 'strong', objective: 'quality', minContextWindow: 16_000 },
+  // Value (not raw quality) so Sonnet/GPT-class beats Opus on everyday work
+  // when resolveIntent is called without an explicit policy override.
+  'balanced-agent': { floor: 'strong', objective: 'value', minContextWindow: 16_000 },
   'huge-context': { floor: 'strong', objective: 'quality', minContextWindow: 200_000 },
   'fast-cheap': { floor: 'mid', objective: 'cost', minContextWindow: 8_000 },
   'local-offline': { floor: 'small', objective: 'cost', minContextWindow: 0 },

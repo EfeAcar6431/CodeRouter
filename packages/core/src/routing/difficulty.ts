@@ -41,6 +41,21 @@ const HARD_KEYWORDS =
 const STACK_TRACE = /(\bat\s+.+\(.+:\d+\)|Traceback \(most recent call last\)|Exception in thread)/;
 const CODE_FENCE = /```/;
 
+/**
+ * Creative / visual work (logos, icons, images, UI mockups). These should
+ * NOT escalate to frontier coding models — the agent loop needs a cheap
+ * tools-capable model that can call `generate_image`, not Opus rewriting
+ * the whole repo. Exported so `pick()` can short-circuit before the
+ * difficulty estimator treats "redesign the logo" as a frontier refactor.
+ */
+export const CREATIVE_TASK_RE =
+  /\b(logo|icon|favicon|app\s*icon|wordmark|brand\s*mark|generate\s+(an?\s+)?image|image\s+generat|dall-?e|flux|midjourney|stable\s*diffusion|text-to-image|png|svg\s+logo|hero\s+image|illustration|mockup|banner\s+image)\b/i;
+
+export function isCreativeTask(prompt: string | undefined): boolean {
+  if (!prompt) return false;
+  return CREATIVE_TASK_RE.test(prompt);
+}
+
 function clamp(x: number, lo: number, hi: number): number {
   return Math.max(lo, Math.min(hi, x));
 }

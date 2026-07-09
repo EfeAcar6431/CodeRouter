@@ -1,9 +1,9 @@
 import { EDITABLE_ADAPTERS, resolveIntent } from '../catalog/resolve.js';
 import type { Intent } from '../catalog/types.js';
-import { routingPolicy } from '../models/index.js';
+import { creativeTaskPolicy, routingPolicy } from '../models/index.js';
 import type { ProviderRegistry } from '../providers/registry.js';
 import type { Classification, Effort, RouteRef } from '../types.js';
-import { estimateDifficulty } from './difficulty.js';
+import { estimateDifficulty, isCreativeTask } from './difficulty.js';
 import { effortProfile } from './effort.js';
 import { matchInstant } from './instant.js';
 
@@ -182,9 +182,16 @@ export function pick(
   //    strong models compete on a normalized value score (quality, price,
   //    speed, context), so everyday work no longer always lands on the most
   //    expensive frontier model. See `models/policies.ts`.
+  //
+  // Creative / visual prompts (logo, icon, generate image, …) short-circuit
+  // to a cheap tools-capable agent. Without this, "redesign the logo" hits
+  // HARD_KEYWORDS (`redesign`) and the frontier band, and Opus burns
+  // millions of tokens reinventing image generation via bash.
   const { taskType } = classification;
   const difficulty = estimateDifficulty(classification, effort, opts.prompt);
-  const policy = routingPolicy(classification, effort, difficulty);
+  const policy = isCreativeTask(opts.prompt)
+    ? creativeTaskPolicy()
+    : routingPolicy(classification, effort, difficulty);
 
   const resolveByPolicy = (intent: Intent, rationale: string): RouteRef | null => {
     const ref = resolveIntent(intent, ctx.registry, {

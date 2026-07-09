@@ -19,6 +19,7 @@ export const FILTER_REASON_CODES = [
   'over_cost_budget',
   'over_latency_budget',
   'not_editable',
+  'vision_not_supported',
 ] as const;
 
 export type FilterReasonCode = (typeof FILTER_REASON_CODES)[number];

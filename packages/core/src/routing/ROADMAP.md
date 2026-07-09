@@ -65,7 +65,10 @@ logged outcomes.
 
 ## Step 15 — Shadow mode
 
-**Goal:** compare policies on live traffic with zero risk.
+**Status (partial):** Agent mode now **live-routes** through `routeSubtask`
+via `agentRoute.ts` and still logs every decision + primary invocation for
+training. The remaining shadow work is A/B: run a *candidate* policy
+alongside the live one and compare without executing the shadow arm.
 
 - Run the candidate policy *alongside* the active one on every request, log both
   decisions (the shadow decision is logged, never executed), and diff them.

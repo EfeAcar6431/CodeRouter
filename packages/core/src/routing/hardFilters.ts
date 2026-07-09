@@ -89,6 +89,7 @@ export function filterCandidates(
     if (task.requiresStructuredOutput && !m.supportsStructuredOutput) {
       reasons.push('structured_outputs_not_supported');
     }
+    if (task.requiresVision && !m.supportsVision) reasons.push('vision_not_supported');
 
     // Privacy: unconfirmable EU/ZDR support is a rejection.
     if (task.privacy?.euOnly && !confirmsEu(m)) reasons.push('eu_not_supported');

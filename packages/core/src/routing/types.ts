@@ -44,6 +44,8 @@ export type CodingSubtask = {
 
   requiresTools?: boolean;
   requiresStructuredOutput?: boolean;
+  /** When true, only vision-capable (image-input) models survive hard filters. */
+  requiresVision?: boolean;
 
   riskTier: RiskTier;
 

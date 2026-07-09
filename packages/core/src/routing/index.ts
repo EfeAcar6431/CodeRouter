@@ -20,4 +20,5 @@ export * from './router.js';
 export * from './executor.js';
 export * from './logger.js';
 export * from './shadow.js';
+export * from './agentRoute.js';
 export * from './policies/heuristicPolicy.js';

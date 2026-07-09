@@ -8,7 +8,12 @@ import { fastClassification } from '../routing/fast.js';
 import { matchInstant } from '../routing/instant.js';
 import { pick } from '../routing/policy.js';
 import { effortProfile } from '../routing/effort.js';
-import { classificationToSubtask, shadowRoute } from '../routing/shadow.js';
+import {
+  classificationToSubtask,
+  collectAgentCandidates,
+  routeAgentLive,
+} from '../routing/agentRoute.js';
+import { RoutingLogger } from '../routing/logger.js';
 import { runHandoff } from '../handoff/workflow.js';
 import {
   changedFiles,
@@ -104,32 +109,101 @@ export async function runAgentMode(input: ModeInput, ctx: ModeContext): Promise<
   // Detect image file paths referenced in the prompt.
   const detectedImages = detectPromptImages(input.prompt, input.cwd);
   const images = [...detectedImages, ...(input.images ?? [])];
-  const requiresVision = images.length > 0;
+  let requiresVision = images.length > 0;
 
-  // Agent mode rewrites files, so every route it picks MUST be backed by a
-  // tools-capable (editable) adapter. `requireEditable` filters the candidate
-  // pool up front so the router can't hand back a chat-only sibling (e.g.
-  // OpenRouter's `openai_compat` provider) that would trip the canEdit guard
-  // below and abort the run. An explicit `--route` override is honored as-is.
-  let route = input.route
-    ? parseRoute(input.route)
-    : pick(classification, ctx.router, { effort, requiresVision, requireEditable: true, prompt: input.prompt });
+  // Explicit `--route` still wins. Otherwise the four-layer router
+  // (`routeSubtask`) picks the model and we log the decision for future
+  // training. The existing agent tool loop still executes — we only
+  // change *which* model runs it.
+  let route: RouteRef;
+  let routingDecisionId: string | null = null;
+  if (input.route) {
+    route = parseRoute(input.route);
+  } else {
+    progress({ phase: 'agent/route', stage: 'start' });
+    const subtask = classificationToSubtask({
+      subtaskId: runId,
+      prompt: input.prompt,
+      classification,
+      effort,
+      repoId: input.cwd,
+      requiresVision,
+    });
+    const legacyFallback = pick(classification, ctx.router, {
+      effort,
+      requiresVision,
+      requireEditable: true,
+      prompt: input.prompt,
+    });
+    const candidates = await collectAgentCandidates(ctx.registry);
+    const live = await routeAgentLive({
+      task: subtask,
+      registry: ctx.registry,
+      store: input.dryRun ? undefined : ctx.store?.routing,
+      fallback: legacyFallback,
+      candidates,
+    });
+    route = live.route;
+    routingDecisionId = live.decisionId;
 
-  // If vision was required but no vision model is available, the router
-  // hands back a `no-vision-model` sentinel (provider 'none'). Warn,
-  // drop the images, and re-route WITHOUT the vision constraint so we
-  // still produce a (text-only) answer instead of crashing on the
-  // sentinel's bogus provider.
-  if (requiresVision && route.model === 'no-vision-model') {
+    // Vision required but no vision model survived filters → drop images
+    // and re-route text-only (same posture as the old pick() sentinel).
+    if (
+      requiresVision &&
+      (route.model === 'no-vision-model' ||
+        live.result?.decision.strategy === 'holdout' ||
+        (live.result &&
+          !live.result.score.ranked.some(
+            (s) => s.model.modelId === route.model && s.model.supportsVision,
+          )))
+    ) {
+      progress({
+        phase: 'agent/route',
+        stage: 'done',
+        data: {
+          warning:
+            'no vision-capable model is enabled; running text-only — enable one in /setup',
+        },
+      });
+      images.length = 0;
+      requiresVision = false;
+      const textSubtask = classificationToSubtask({
+        subtaskId: runId,
+        prompt: input.prompt,
+        classification,
+        effort,
+        repoId: input.cwd,
+        requiresVision: false,
+      });
+      const textFallback = pick(classification, ctx.router, {
+        effort,
+        requireEditable: true,
+        prompt: input.prompt,
+      });
+      const retry = await routeAgentLive({
+        task: textSubtask,
+        registry: ctx.registry,
+        store: input.dryRun ? undefined : ctx.store?.routing,
+        fallback: textFallback,
+        candidates,
+      });
+      route = retry.route;
+      routingDecisionId = retry.decisionId ?? routingDecisionId;
+    }
+
     progress({
       phase: 'agent/route',
       stage: 'done',
-      data: { warning: 'no vision-capable model is enabled; running text-only — enable one in /setup' },
+      data: {
+        route: {
+          provider: route.provider,
+          model: route.model,
+          via: route.via ?? route.provider,
+          rationale: route.rationale,
+        },
+        decisionId: routingDecisionId,
+      },
     });
-    images.length = 0; // clear so we don't try to attach
-    route = input.route
-      ? parseRoute(input.route)
-      : pick(classification, ctx.router, { effort, requireEditable: true, prompt: input.prompt });
   }
 
   const adapter: Adapter = ctx.resolveAdapter
@@ -150,20 +224,6 @@ export async function runAgentMode(input: ModeInput, ctx: ModeContext): Promise<
       `agent mode requires a tools-capable provider, but the router picked '${route.provider}:${route.model}' which is chat-only. ` +
         `Configure a coding-agent provider via /setup (Claude Code or Codex on PATH, or any OpenRouter / OpenAI / etc. key - those route through the CodeRouter agent loop), or pick a tools-capable model directly with --route.`,
     );
-  }
-
-  // Shadow the new four-layer router alongside the live `pick` decision.
-  // Best-effort and fire-and-forget: it logs a `routeSubtask` decision for the
-  // eval/replay harness but never affects which adapter actually runs here.
-  if (ctx.store && !input.dryRun) {
-    const subtask = classificationToSubtask({
-      subtaskId: runId,
-      prompt: input.prompt,
-      classification,
-      effort,
-      repoId: input.cwd,
-    });
-    void shadowRoute(ctx.store.routing, subtask);
   }
 
   progress({ phase: 'agent/worktree', stage: 'start' });
@@ -357,6 +417,26 @@ export async function runAgentMode(input: ModeInput, ctx: ModeContext): Promise<
     throw err;
   }
   progress({ phase: 'agent/run', stage: 'done' });
+
+  // Attach the primary invocation to the logged routing decision so
+  // future training has (features, decision, realized tokens/cost).
+  if (routingDecisionId && ctx.store && !input.dryRun) {
+    try {
+      new RoutingLogger(ctx.store.routing).logInvocation(routingDecisionId, 'primary', {
+        modelId: route.model,
+        via: route.via ?? route.provider,
+        provider: route.provider,
+        status: 'ok',
+        tokensIn: res.tokensIn,
+        tokensOut: res.tokensOut,
+        costUsd: res.costUsd,
+        latencyMs: res.durationMs ?? performance.now() - start,
+        text: res.text?.slice(0, 500),
+      });
+    } catch {
+      // best-effort
+    }
+  }
 
   // Compute the diff once, up front: it gates whether validators
   // (and therefore handoff) make sense at all. If the model didn't

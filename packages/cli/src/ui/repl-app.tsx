@@ -2635,23 +2635,24 @@ function App({ cwd, initialMode, fullscreen: fullscreenInit }: AppProps): React.
             busy={busy}
             configured={setupState.configured}
           />
-          {!busy && (
-            <Box marginTop={1} paddingX={1} flexDirection="column">
-              <StatusRow
-                mode={mode}
-                effort={effort}
-                apply={apply}
-                fast={fast}
-                security={securityPolicy}
-                apiKeys={setupState.apiKeys}
-                hosts={setupState.hosts}
-                fullscreen={fullscreen}
-              />
-              {(sessionUsage.tokensIn > 0 || sessionUsage.tokensOut > 0) && (
-                <Text color="gray">{`session ${formatUsage(sessionUsage)}`}</Text>
-              )}
-            </Box>
-          )}
+          {/* Config chips + session totals stay visible even while a run
+              is streaming so the user can always see mode/effort/apply and
+              their running spend. */}
+          <Box marginTop={1} paddingX={1} flexDirection="column">
+            <StatusRow
+              mode={mode}
+              effort={effort}
+              apply={apply}
+              fast={fast}
+              security={securityPolicy}
+              apiKeys={setupState.apiKeys}
+              hosts={setupState.hosts}
+              fullscreen={fullscreen}
+            />
+            {(sessionUsage.tokensIn > 0 || sessionUsage.tokensOut > 0) && (
+              <Text color="gray">{`session ${formatUsage(sessionUsage)}`}</Text>
+            )}
+          </Box>
         </>
       )}
     </>

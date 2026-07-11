@@ -2417,11 +2417,16 @@ function App({ cwd, initialMode }: AppProps): React.ReactElement {
   const liveThreadLines = busy
     ? liveLog.reduce((n, e) => n + estimateLogEntryLines(e) + 1, 0) + 3
     : 0;
-  // chatbox (3) + status row (2) + a little breathing room.
+  // chatbox (3) + status row (2) + breathing room.
   const footerLines = 6;
+  // Lines printed ABOVE Ink's frame that we can't measure (the shell
+  // prompt that launched `cr`, any stray stdout). Bias the filler LOW by
+  // reserving for these so we never overflow and clip the wordmark - a
+  // small gap under the input is fine, a cropped title is not.
+  const preFrameReserve = 4;
   const bottomFiller = Math.max(
     0,
-    termRows - committedLines - liveThreadLines - footerLines - 1,
+    termRows - committedLines - liveThreadLines - footerLines - preFrameReserve,
   );
 
   return (
@@ -2690,7 +2695,9 @@ function estimateHistoryItemLines(item: HistoryItem, width: number): number {
   switch (item.kind) {
     case 'welcome': {
       const wordmark = width >= 102 ? WORDMARK_PIXEL : WORDMARK_SMALL;
-      return wordmark.split('\n').length + 2 + 11;
+      // wordmark + margins/tagline (~4) + tips box (~13, incl. border,
+      // padding, and the optional detected-hosts panel).
+      return wordmark.split('\n').length + 4 + 13;
     }
     case 'user':
       return item.text.split('\n').length + 2;

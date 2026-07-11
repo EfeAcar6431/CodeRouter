@@ -1,5 +1,6 @@
 import type { ActivityEvent, Adapter, AskUserQuestionPayload } from '../adapters/types.js';
 import type { ChatMessage } from '../agent/transport/types.js';
+import type { PlanClarifyAnswer, PlanClarifyQuestion } from '../clarify/planQuestions.js';
 import type { Clarification } from '../clarify/types.js';
 import type { ProviderRegistry } from '../providers/registry.js';
 import type { RouterContext } from '../routing/policy.js';
@@ -153,6 +154,19 @@ export type ModeInput = {
    * change ever made in the session.
    */
   keepWorktree?: boolean;
+  /**
+   * When true (REPL), plan/masterplan may return early with
+   * `clarifyQuestions` instead of drafting immediately — Claude-style
+   * multi-choice Q&A before synthesis. One-shot CLI leaves this unset
+   * so plans still draft in a single pass.
+   */
+  interactive?: boolean;
+  /**
+   * Answers to a prior `clarifyQuestions` round. When present (even
+   * empty), plan mode skips the ask gate and injects the answers into
+   * the planner prompt.
+   */
+  clarificationAnswers?: PlanClarifyAnswer[];
 };
 
 /**
@@ -194,6 +208,13 @@ export type ModeOutput = {
   routes?: RouteRef[];
   validators?: ValidatorResult[];
   clarifications?: Clarification[];
+  /**
+   * Structured multi-choice questions the REPL should ask before the
+   * planner drafts. Set when `interactive` is on and answers haven't
+   * been supplied yet; status is `partial` and no `planFile` is
+   * produced.
+   */
+  clarifyQuestions?: PlanClarifyQuestion[];
   citations?: Citation[];
   costUsd: number;
   tokensIn: number;

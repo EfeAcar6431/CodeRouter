@@ -155,6 +155,15 @@ export { savePlanFile, loadPlanFile, renderPlanFile, parsePlanFile, newEmptyPlan
 export type { PlanFile, PlanPhase, PlanFrontmatter } from './modes/planFile.js';
 export type { Clarification, ClarificationSignal } from './clarify/types.js';
 export {
+  buildPlanClarifyQuestions,
+  formatClarifyAnswers,
+} from './clarify/planQuestions.js';
+export type {
+  PlanClarifyAnswer,
+  PlanClarifyOption,
+  PlanClarifyQuestion,
+} from './clarify/planQuestions.js';
+export {
   buildBrief,
   renderBriefAsPrompt,
   runHandoff,

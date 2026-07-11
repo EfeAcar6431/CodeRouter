@@ -31,6 +31,7 @@ export function buildReport(prompt: string, out: ModeOutput): Report {
     planId: out.planFile?.frontmatter.planId,
     phases: out.planFile?.frontmatter.phases,
     clarifications: out.clarifications,
+    clarifyQuestions: out.clarifyQuestions,
     securityFindings: out.securityFindings,
     applied: out.applied,
     applyError: out.applyError,

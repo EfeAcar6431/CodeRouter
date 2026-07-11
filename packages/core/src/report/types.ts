@@ -1,4 +1,5 @@
 import type { ChatMessage } from '../agent/transport/types.js';
+import type { PlanClarifyQuestion } from '../clarify/planQuestions.js';
 import type { Clarification } from '../clarify/types.js';
 import type { PlanPhase } from '../modes/planFile.js';
 import type { WorktreeHandle } from '../modes/types.js';
@@ -65,6 +66,11 @@ export type Report = {
    * before building.
    */
   clarifications?: Clarification[];
+  /**
+   * Interactive multi-choice questions for the REPL clarify wizard.
+   * Present when plan mode paused with `status: 'partial'`.
+   */
+  clarifyQuestions?: PlanClarifyQuestion[];
   /** Optional human-readable text artifact (plan markdown / debug tree). */
   text?: string;
   /**

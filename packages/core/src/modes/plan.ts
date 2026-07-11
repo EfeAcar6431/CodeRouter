@@ -1,5 +1,10 @@
 import { randomUUID } from 'node:crypto';
 import { detectClarifications } from '../clarify/detector.js';
+import {
+  buildPlanClarifyQuestions,
+  formatClarifyAnswers,
+  type PlanClarifyAnswer,
+} from '../clarify/planQuestions.js';
 import { ClassifierCascade, loadSeedCorpus } from '../classify/index.js';
 import { scanContext } from '../context/scan.js';
 import { composeDirectives } from '../customize/index.js';
@@ -8,14 +13,15 @@ import { pick } from '../routing/policy.js';
 import { effortProfile } from '../routing/effort.js';
 import type { Adapter } from '../adapters/types.js';
 import type { RouteRef } from '../types.js';
-import { newEmptyPlanFile, type PlanFile } from './planFile.js';
+import { newEmptyPlanFile } from './planFile.js';
 import { noopProgress, routeProgressData } from './progress.js';
 import type { ModeContext, ModeInput, ModeOutput } from './types.js';
 
 /**
  * Plan mode.
  *
- *   Phase 1: clarify (skipped when nothing is ambiguous)
+ *   Phase 1: clarify — in interactive REPL, may return early with
+ *            multi-choice questions (Claude-style) before drafting
  *   Phase 4: synthesize via single-model `plan(task)`
  *   Phase 6: emit a plain-markdown plan with a phased structure
  *
@@ -40,11 +46,40 @@ export async function runPlanMode(input: ModeInput, ctx: ModeContext): Promise<M
   const directives = await composeDirectives(input.cwd).catch(() => '');
   const memoryText = [memory.text, directives].filter(Boolean).join('\n\n');
   const clarifications = detectClarifications({ prompt: input.prompt, classification });
-  progress({ phase: 'plan/phase1', stage: 'done', index: 1, total: 3 });
 
   const manifest = input.fast
     ? { entries: [], totalTokens: 0, budget: 0, truncated: false }
     : await scanContext({ cwd: input.cwd, prompt: input.prompt });
+
+  // Interactive gate: ask structured questions BEFORE spending tokens
+  // on a draft. Answers are injected on the follow-up dispatch.
+  const answersProvided = input.clarificationAnswers !== undefined;
+  if (input.interactive && !answersProvided) {
+    const clarifyQuestions = buildPlanClarifyQuestions({
+      prompt: input.prompt,
+      classification,
+      clarifications,
+      emptyRepo: manifest.entries.length < 3,
+    });
+    progress({ phase: 'plan/phase1', stage: 'done', index: 1, total: 3 });
+    if (clarifyQuestions.length > 0) {
+      return {
+        mode: 'plan',
+        status: 'partial',
+        runId,
+        clarifyQuestions,
+        classification,
+        contextManifest: manifest,
+        clarifications,
+        costUsd: 0,
+        tokensIn: 0,
+        tokensOut: 0,
+        durationMs: performance.now() - start,
+        rationale: 'awaiting clarifying answers before drafting',
+      };
+    }
+  }
+  progress({ phase: 'plan/phase1', stage: 'done', index: 1, total: 3 });
 
   progress({ phase: 'plan/phase4', stage: 'start', index: 2, total: 3, message: 'synthesize' });
   const route = input.route
@@ -69,6 +104,7 @@ export async function runPlanMode(input: ModeInput, ctx: ModeContext): Promise<M
     prompt: input.prompt,
     memoryText,
     manifestPaths: manifest.entries.map((e) => e.path),
+    answers: input.clarificationAnswers,
   });
   const res = await (adapter.plan ?? adapter.run).call(adapter, {
     prompt: planPrompt,
@@ -129,16 +165,24 @@ export async function runPlanMode(input: ModeInput, ctx: ModeContext): Promise<M
   };
 }
 
-function buildPlannerPrompt(args: { prompt: string; memoryText: string; manifestPaths: string[] }): string {
+function buildPlannerPrompt(args: {
+  prompt: string;
+  memoryText: string;
+  manifestPaths: string[];
+  answers?: PlanClarifyAnswer[];
+}): string {
+  const answerBlock = formatClarifyAnswers(args.answers ?? []);
   return [
     'You are CodeRouter Plan mode. Produce a focused implementation plan as numbered phases.',
     'Each phase MUST include a short title, a 1-2 sentence intent, and concrete files to touch.',
     'No code blocks. Mark open questions explicitly as "OPEN:".',
+    'Treat user clarifications below as hard constraints — do not re-ask them.',
     '',
     args.memoryText ? `# Project memory\n${args.memoryText}` : '',
     args.manifestPaths.length > 0
       ? `# Likely files (from repo scan)\n${args.manifestPaths.slice(0, 15).map((p) => `- ${p}`).join('\n')}`
       : '',
+    answerBlock,
     '',
     '# Task',
     args.prompt,

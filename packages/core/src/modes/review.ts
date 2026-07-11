@@ -4,7 +4,7 @@ import { pickStrong } from '../routing/policy.js';
 import { ClassifierCascade, loadSeedCorpus } from '../classify/index.js';
 import type { Adapter } from '../adapters/types.js';
 import type { RouteRef } from '../types.js';
-import { noopProgress } from './progress.js';
+import { noopProgress, routeProgressData } from './progress.js';
 import type { ModeContext, ModeInput, ModeOutput } from './types.js';
 
 /**
@@ -48,7 +48,11 @@ export async function runReviewMode(input: ModeInput, ctx: ModeContext): Promise
     ? ctx.resolveAdapter(route)
     : ctx.registry.resolve(`${route.via ?? route.provider},${route.model}`).adapter;
 
-  progress({ phase: 'review/judge', stage: 'start' });
+  progress({
+    phase: 'review/judge',
+    stage: 'start',
+    data: routeProgressData(route),
+  });
   const out = await adapter.run({
     prompt: [
       'Review the following diff. Produce structured feedback:',

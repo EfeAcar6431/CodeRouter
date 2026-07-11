@@ -26,7 +26,7 @@ import type { Adapter } from '../adapters/types.js';
 import type { Citation, RouteRef } from '../types.js';
 import { extractOpenQuestions, extractPhases } from './plan.js';
 import { newEmptyPlanFile, type PlanFile } from './planFile.js';
-import { noopProgress } from './progress.js';
+import { noopProgress, routeProgressData } from './progress.js';
 import type { ModeContext, ModeInput, ModeOutput } from './types.js';
 
 /**
@@ -101,6 +101,16 @@ export async function runMasterplanMode(
 
   if (effort === 'max') {
     const strong = pickStrong(classification, ctx.router, 'max');
+    if (strong[0]) {
+      progress({
+        phase: 'masterplan/phase4',
+        stage: 'progress',
+        index: 4,
+        total: 6,
+        message: 'synthesize',
+        data: routeProgressData(strong[0]),
+      });
+    }
     const tournament = await runTournament({
       task: synthesizePrompt,
       routes: strong,
@@ -119,6 +129,16 @@ export async function runMasterplanMode(
     synthesisRoute = strong;
   } else if (effort === 'high') {
     const strong = pickStrong(classification, ctx.router, 'high');
+    if (strong[0]) {
+      progress({
+        phase: 'masterplan/phase4',
+        stage: 'progress',
+        index: 4,
+        total: 6,
+        message: 'synthesize',
+        data: routeProgressData(strong[0]),
+      });
+    }
     if (strong.length >= 2) {
       const dual = await runDualPlan({
         task: synthesizePrompt,
@@ -132,13 +152,13 @@ export async function runMasterplanMode(
       synthesisCost = dual.totalCostUsd;
       synthesisRoute = [strong[0]!, strong[1]!];
     } else {
-      const single = await singlePlan(synthesizePrompt, classification, ctx, effort, input);
+      const single = await singlePlan(synthesizePrompt, classification, ctx, effort, input, progress);
       planText = single.text;
       synthesisCost = single.costUsd;
       synthesisRoute = [single.route];
     }
   } else {
-    const single = await singlePlan(synthesizePrompt, classification, ctx, effort, input);
+    const single = await singlePlan(synthesizePrompt, classification, ctx, effort, input, progress);
     planText = single.text;
     synthesisCost = single.costUsd;
     synthesisRoute = [single.route];
@@ -252,8 +272,17 @@ async function singlePlan(
   ctx: ModeContext,
   effort: import('../types.js').Effort,
   input: ModeInput,
+  progress: import('./progress.js').ProgressNotifier = noopProgress,
 ): Promise<{ text: string; costUsd: number; route: RouteRef }> {
   const route = pick(classification, ctx.router, { effort });
+  progress({
+    phase: 'masterplan/phase4',
+    stage: 'progress',
+    index: 4,
+    total: 6,
+    message: 'synthesize',
+    data: routeProgressData(route),
+  });
   const adapter: Adapter = ctx.resolveAdapter
     ? ctx.resolveAdapter(route)
     : ctx.registry.resolve(`${route.via ?? route.provider},${route.model}`).adapter;

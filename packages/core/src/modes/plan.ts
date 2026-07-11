@@ -9,7 +9,7 @@ import { effortProfile } from '../routing/effort.js';
 import type { Adapter } from '../adapters/types.js';
 import type { RouteRef } from '../types.js';
 import { newEmptyPlanFile, type PlanFile } from './planFile.js';
-import { noopProgress } from './progress.js';
+import { noopProgress, routeProgressData } from './progress.js';
 import type { ModeContext, ModeInput, ModeOutput } from './types.js';
 
 /**
@@ -50,6 +50,16 @@ export async function runPlanMode(input: ModeInput, ctx: ModeContext): Promise<M
   const route = input.route
     ? parseRoute(input.route)
     : pick(classification, ctx.router, { effort: input.effort ?? 'medium' });
+  // Emit the chosen model BEFORE the adapter streams so the REPL can
+  // stamp every tool/text block + the spinner with the route label.
+  progress({
+    phase: 'plan/phase4',
+    stage: 'progress',
+    index: 2,
+    total: 3,
+    message: 'synthesize',
+    data: routeProgressData(route),
+  });
   const adapter: Adapter = ctx.resolveAdapter
     ? ctx.resolveAdapter(route)
     : ctx.registry.resolve(`${route.via ?? route.provider},${route.model}`).adapter;

@@ -8,7 +8,7 @@ import { pickStrong } from '../routing/policy.js';
 import { runTournament } from '../workflows/tournament.js';
 import type { Adapter } from '../adapters/types.js';
 import type { RouteRef } from '../types.js';
-import { noopProgress } from './progress.js';
+import { noopProgress, routeProgressData } from './progress.js';
 import type { ModeContext, ModeInput, ModeOutput } from './types.js';
 
 /**
@@ -60,6 +60,11 @@ export async function runDebugMode(input: ModeInput, ctx: ModeContext): Promise<
   let cost = 0;
 
   if (effort === 'max' && strong.length >= 2) {
+    progress({
+      phase: 'debug/hypothesis',
+      stage: 'progress',
+      data: routeProgressData(strong[0]!),
+    });
     const t = await runTournament({
       task: `${evidence}\n\nGenerate 3 ranked hypotheses for the root cause. For each: claim, supporting evidence, recommended next probe.`,
       routes: strong,
@@ -79,6 +84,11 @@ export async function runDebugMode(input: ModeInput, ctx: ModeContext): Promise<
   } else {
     const route = strong[0] ?? pickStrong(classification, ctx.router, effort)[0];
     if (!route) throw new Error('debug: no strong route available');
+    progress({
+      phase: 'debug/hypothesis',
+      stage: 'progress',
+      data: routeProgressData(route),
+    });
     const adapter: Adapter = ctx.resolveAdapter
       ? ctx.resolveAdapter(route)
       : ctx.registry.resolve(`${route.via ?? route.provider},${route.model}`).adapter;

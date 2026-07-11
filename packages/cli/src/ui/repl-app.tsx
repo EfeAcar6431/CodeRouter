@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import React, { Fragment, useEffect, useMemo, useRef, useState } from 'react';
-import { Box, Static, Text, measureElement, render, useApp, useInput, useStdin, useStdout } from 'ink';
+import { Box, Static, Text, measureElement, render, useApp, useInput, useStdout } from 'ink';
 import type {
   ActivityEvent,
   AskUserQuestionPayload,
@@ -311,7 +311,6 @@ type AppProps = {
 function App({ cwd, initialMode, fullscreen: fullscreenInit }: AppProps): React.ReactElement {
   const { exit } = useApp();
   const { stdout } = useStdout();
-  const { stdin } = useStdin();
 
   // Fullscreen (alternate-screen) renderer: input is pinned in reserved
   // bottom rows and the transcript is an app-owned viewport, so output
@@ -361,30 +360,9 @@ function App({ cwd, initialMode, fullscreen: fullscreenInit }: AppProps): React.
     };
   }, [fullscreen, stdout]);
 
-  // Parse mouse-wheel events (SGR: ESC[<64;x;yM = wheel up, 65 = wheel
-  // down) and scroll the viewport. A second stdin 'data' listener runs
-  // alongside Ink's own keypress parser; Ink ignores these escape
-  // sequences so they don't leak into the input box.
-  useEffect(() => {
-    if (!fullscreen || !stdin) return;
-    const onData = (data: Buffer): void => {
-      const s = data.toString('utf8');
-      const re = /\x1b\[<(\d+);\d+;\d+[Mm]/g;
-      let delta = 0;
-      let m: RegExpExecArray | null = re.exec(s);
-      while (m !== null) {
-        const button = Number(m[1]);
-        if (button === 64) delta += 3;
-        else if (button === 65) delta -= 3;
-        m = re.exec(s);
-      }
-      if (delta !== 0) setScrollUp((v) => Math.max(0, v + delta));
-    };
-    stdin.on('data', onData);
-    return () => {
-      stdin.off('data', onData);
-    };
-  }, [fullscreen, stdin]);
+  // NOTE: mouse-wheel handling lives in the keyboard handler (useInput)
+  // below - Ink delivers the SGR sequence as `char`, so we detect and
+  // swallow it there to both scroll and keep it out of the input box.
 
   // Hydrate env from the credentials file once on mount. We do it inside
   // useState's initializer so the very first detectConfiguredProviders()
@@ -2068,6 +2046,27 @@ function App({ cwd, initialMode, fullscreen: fullscreenInit }: AppProps): React.
       return;
     }
 
+    // Mouse-wheel events arrive as an SGR sequence in `char`
+    // (ESC[<64;x;yM = wheel up, 65 = wheel down). Swallow them so they
+    // never land in the input box, and use them to scroll the
+    // fullscreen viewport. We match without the leading ESC since Ink
+    // strips it before handing us `char`.
+    if (char && /\[<\d+;\d+;\d+[Mm]/.test(char)) {
+      if (fullscreen) {
+        let delta = 0;
+        const re = /\[<(\d+);\d+;\d+[Mm]/g;
+        let m: RegExpExecArray | null = re.exec(char);
+        while (m !== null) {
+          const button = Number(m[1]);
+          if (button === 64) delta += 3;
+          else if (button === 65) delta -= 3;
+          m = re.exec(char);
+        }
+        if (delta !== 0) setScrollUp((s) => Math.max(0, s + delta));
+      }
+      return;
+    }
+
     // Fullscreen viewport scrollback: PgUp/PgDn page through the
     // transcript; the input keeps focus. Only meaningful in fullscreen
     // (classic uses the terminal's own scrollback).
@@ -2643,23 +2642,35 @@ function App({ cwd, initialMode, fullscreen: fullscreenInit }: AppProps): React.
   // overflow hidden), so new output fills upward and the footer never
   // moves. No <Static> here - we own the whole surface.
   if (fullscreen) {
+    // The wordmark/tips banner is a FIXED header at the top; the
+    // scrollable transcript excludes it.
+    const transcript = history.filter((it) => it.kind !== 'welcome');
     // Estimate content vs. viewport height to clamp scroll-up so we
     // never scroll past the top (which would show a blank viewport).
     const fsContentLines =
-      history.reduce((n, it) => n + estimateHistoryItemLines(it, termSize.cols) + 1, 0) +
+      transcript.reduce((n, it) => n + estimateHistoryItemLines(it, termSize.cols) + 1, 0) +
       liveThreadLines;
     const fsFooterLines = wizardStep === 'idle' ? 6 : 12;
-    const fsViewportH = Math.max(3, termSize.rows - fsFooterLines);
+    const fsHeaderLines = estimateHistoryItemLines({ id: -1, kind: 'welcome' }, termSize.cols);
+    const fsViewportH = Math.max(3, termSize.rows - fsFooterLines - fsHeaderLines);
     const fsMaxScroll = Math.max(0, fsContentLines - fsViewportH);
     const fsScroll = Math.min(scrollUp, fsMaxScroll);
     return (
       <Box flexDirection="column" width={termSize.cols} height={termSize.rows}>
+        {/* Fixed header — the CodeRouter wordmark stays pinned at the top. */}
+        <Box flexShrink={0} flexDirection="column">
+          <WordmarkPanel />
+          {!setupState.configured && setupState.hosts.length > 0 && (
+            <DetectedHostsPanel hosts={setupState.hosts} />
+          )}
+          <TipsPanel mode={mode} />
+        </Box>
         <Box flexGrow={1} flexDirection="column" justifyContent="flex-end" overflow="hidden">
           {/* marginBottom pushes content up by `fsScroll` lines inside the
               bottom-anchored, clipped viewport — that's how scroll-up works
               without needing exact measurement. */}
           <Box flexDirection="column" marginBottom={fsScroll}>
-            {history.map((item) => (
+            {transcript.map((item) => (
               <Box key={item.id} flexDirection="column" marginBottom={1}>
                 <HistoryItemBody item={item} setupState={setupState} mode={mode} />
               </Box>

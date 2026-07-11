@@ -813,9 +813,10 @@ function App({ cwd, initialMode }: AppProps): React.ReactElement {
    */
   function flushLiveOverflowToHistory(): void {
     const rows = process.stdout.rows ?? 40;
-    // Reserve room for: spinner row, esc-hint, blank line,
-    // chatbox, status row, and the pinned footer margin.
-    const reserved = 12;
+    // Reserve room for: spinner row, esc-hint row, blank line,
+    // chatbox (3 lines), status row. Conservative on small
+    // terminals, generous on large ones.
+    const reserved = 8;
     const maxLines = Math.max(8, rows - reserved);
 
     // Cheap height estimate. Doesn't account for terminal width
@@ -2403,7 +2404,7 @@ function App({ cwd, initialMode }: AppProps): React.ReactElement {
   });
 
   return (
-    <Box flexDirection="column" height={process.stdout.rows}>
+    <Box flexDirection="column">
       <Static items={history}>
         {(item) => (
           <Box key={item.id} flexDirection="column" marginBottom={1}>
@@ -2470,105 +2471,101 @@ function App({ cwd, initialMode }: AppProps): React.ReactElement {
         )}
       </Static>
 
-      {/* Growable thread: live log + spinner. flexGrow pins the
-          footer (wizards / chatbox) to the bottom of the terminal. */}
-      <Box flexDirection="column" flexGrow={1}>
-        {busy && liveLog.length > 0 && (
-          <Box flexDirection="column" marginBottom={1}>
-            <LogStream entries={liveLog} />
-          </Box>
-        )}
-        {busy && (
-          <Box flexDirection="column" marginBottom={1}>
-            <ProgressLine
-              phase={aborting ? 'aborting…' : phase}
-              routeLabel={formatRouteLabel(currentRoute) ?? undefined}
-              usage={runningUsage}
-              aborting={aborting}
-            />
-            <Box paddingX={1}>
-              <Text color="gray" dimColor>
-                {aborting ? 'sending SIGTERM, force-kill in 2s' : 'esc to interrupt'}
-              </Text>
-            </Box>
-          </Box>
-        )}
-      </Box>
-
-      {/* Fixed footer: wizards + chatbox stay at the bottom. */}
-      <Box flexDirection="column" flexShrink={0}>
-        {wizardStep === 'trust' && <TrustPanel cwd={cwd} choice={trustChoice} />}
-        {wizardStep === 'confirm' && <WizardConfirmPanel choice={confirmChoice} />}
-        {wizardStep === 'pick' && (
-          <SetupManagerPanel rows={managerRows} selectedIdx={wizardPick} />
-        )}
-        {wizardStep === 'key' && wizardProvider && (
-          <WizardKeyPanel provider={wizardProvider} maskedKey={mask(wizardKey)} />
-        )}
-        {wizardStep === 'review' && reviewRun && (
-          <ApprovePromptPanel run={reviewRun} choice={reviewChoice} />
-        )}
-        {wizardStep === 'plan-approve' && planApprove && (
-          <PlanApprovePanel state={planApprove} choice={planApproveChoice} />
-        )}
-        {wizardStep === 'plan-clarify' && planClarify && (
-          <PlanClarifyPanel
-            state={planClarify}
-            questionIndex={clarifyQIdx}
-            optionIndex={clarifyOptIdx}
+      {/* Live thread sits above the chatbox. Do NOT set height=rows /
+          flexGrow here — Ink + <Static> treats that as a full-viewport
+          frame and leaves a hollow split with a crushed side column. */}
+      {busy && liveLog.length > 0 && (
+        <Box flexDirection="column" marginBottom={1}>
+          <LogStream entries={liveLog} />
+        </Box>
+      )}
+      {busy && (
+        <Box flexDirection="column" marginBottom={1}>
+          <ProgressLine
+            phase={aborting ? 'aborting…' : phase}
+            routeLabel={formatRouteLabel(currentRoute) ?? undefined}
+            usage={runningUsage}
+            aborting={aborting}
           />
-        )}
+          <Box paddingX={1}>
+            <Text color="gray" dimColor>
+              {aborting ? 'sending SIGTERM, force-kill in 2s' : 'esc to interrupt'}
+            </Text>
+          </Box>
+        </Box>
+      )}
 
-        {showSuggestions && !busy && suggestions.length > 0 && (
-          <SuggestionsList items={suggestions} selectedIdx={suggIdx} />
-        )}
+      {wizardStep === 'trust' && <TrustPanel cwd={cwd} choice={trustChoice} />}
+      {wizardStep === 'confirm' && <WizardConfirmPanel choice={confirmChoice} />}
+      {wizardStep === 'pick' && (
+        <SetupManagerPanel rows={managerRows} selectedIdx={wizardPick} />
+      )}
+      {wizardStep === 'key' && wizardProvider && (
+        <WizardKeyPanel provider={wizardProvider} maskedKey={mask(wizardKey)} />
+      )}
+      {wizardStep === 'review' && reviewRun && (
+        <ApprovePromptPanel run={reviewRun} choice={reviewChoice} />
+      )}
+      {wizardStep === 'plan-approve' && planApprove && (
+        <PlanApprovePanel state={planApprove} choice={planApproveChoice} />
+      )}
+      {wizardStep === 'plan-clarify' && planClarify && (
+        <PlanClarifyPanel
+          state={planClarify}
+          questionIndex={clarifyQIdx}
+          optionIndex={clarifyOptIdx}
+        />
+      )}
 
-        {showMentions && (
-          <MentionsList items={mentionSuggestions} selectedIdx={suggIdx} />
-        )}
+      {showSuggestions && !busy && suggestions.length > 0 && (
+        <SuggestionsList items={suggestions} selectedIdx={suggIdx} />
+      )}
 
-        {/* Chatbox hidden while a wizard owns the keyboard. */}
-        {wizardStep === 'idle' && (
-          <>
-            {!setupState.configured && !busy && <NoProviderReminder />}
-            {pendingQuestion && !busy && (
-              <Box paddingX={1}>
-                <Text color="yellow" bold>{'? answering: '}</Text>
-                <Text>{truncateOneLine(pendingQuestion.questions[0]?.question ?? '', 80)}</Text>
-              </Box>
-            )}
-            {queuedPrompt && (
-              <Box paddingX={1}>
-                <Text color="cyan" bold>{'↑ queued '}</Text>
-                <Text>{truncateOneLine(queuedPrompt, 80)}</Text>
-                <Text color="gray" dimColor>{'   esc to clear'}</Text>
-              </Box>
-            )}
-            <InputBox
-              value={input}
-              cursor={cursor}
-              busy={busy}
-              configured={setupState.configured}
-            />
-            {!busy && (
-              <Box marginTop={1} paddingX={1} flexDirection="column">
-                <StatusRow
-                  mode={mode}
-                  effort={effort}
-                  apply={apply}
-                  fast={fast}
-                  security={securityPolicy}
-                  apiKeys={setupState.apiKeys}
-                  hosts={setupState.hosts}
-                />
-                {(sessionUsage.tokensIn > 0 || sessionUsage.tokensOut > 0) && (
-                  <Text color="gray">{`session ${formatUsage(sessionUsage)}`}</Text>
-                )}
-              </Box>
-            )}
-          </>
-        )}
-      </Box>
+      {showMentions && (
+        <MentionsList items={mentionSuggestions} selectedIdx={suggIdx} />
+      )}
+
+      {/* Chatbox is last so it stays under the thread; wizards hide it. */}
+      {wizardStep === 'idle' && (
+        <>
+          {!setupState.configured && !busy && <NoProviderReminder />}
+          {pendingQuestion && !busy && (
+            <Box paddingX={1}>
+              <Text color="yellow" bold>{'? answering: '}</Text>
+              <Text>{truncateOneLine(pendingQuestion.questions[0]?.question ?? '', 80)}</Text>
+            </Box>
+          )}
+          {queuedPrompt && (
+            <Box paddingX={1}>
+              <Text color="cyan" bold>{'↑ queued '}</Text>
+              <Text>{truncateOneLine(queuedPrompt, 80)}</Text>
+              <Text color="gray" dimColor>{'   esc to clear'}</Text>
+            </Box>
+          )}
+          <InputBox
+            value={input}
+            cursor={cursor}
+            busy={busy}
+            configured={setupState.configured}
+          />
+          {!busy && (
+            <Box marginTop={1} paddingX={1} flexDirection="column">
+              <StatusRow
+                mode={mode}
+                effort={effort}
+                apply={apply}
+                fast={fast}
+                security={securityPolicy}
+                apiKeys={setupState.apiKeys}
+                hosts={setupState.hosts}
+              />
+              {(sessionUsage.tokensIn > 0 || sessionUsage.tokensOut > 0) && (
+                <Text color="gray">{`session ${formatUsage(sessionUsage)}`}</Text>
+              )}
+            </Box>
+          )}
+        </>
+      )}
     </Box>
   );
 }

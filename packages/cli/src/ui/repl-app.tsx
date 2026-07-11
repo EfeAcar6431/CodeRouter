@@ -2954,21 +2954,29 @@ function PlanClarifyPanel({
   const q = onSubmit ? null : questions[questionIndex];
 
   return (
-    <Box borderStyle="round" borderColor="magenta" paddingX={2} marginBottom={1} flexDirection="column">
+    <Box borderStyle="round" borderColor="cyan" paddingX={2} paddingY={1} marginBottom={1} flexDirection="column">
+      {/* Tab bar: active tab is an inverse pill, answered ones are
+          checked, and "Submit →" trails at the end - mirrors Claude. */}
       <Box>
         {questions.map((qq, i) => {
           const active = i === questionIndex;
           const answered = Boolean(state.answers[qq.id]);
+          const label = answered ? `✓ ${qq.header}` : qq.header;
           return (
-            <Text key={qq.id} color={active ? 'magenta' : answered ? 'green' : 'gray'} bold={active}>
-              {i === 0 ? '' : '  '}
-              {`${i + 1}. ${qq.header}`}
-            </Text>
+            <Box key={qq.id} marginRight={2}>
+              {active ? (
+                <Text backgroundColor="cyan" color="black" bold>{` ${label} `}</Text>
+              ) : (
+                <Text color={answered ? 'green' : 'gray'}>{` ${label} `}</Text>
+              )}
+            </Box>
           );
         })}
-        <Text color={onSubmit ? 'magenta' : 'gray'} bold={onSubmit}>
-          {`  ${submitIdx + 1}. Submit`}
-        </Text>
+        {onSubmit ? (
+          <Text backgroundColor="cyan" color="black" bold>{' Submit → '}</Text>
+        ) : (
+          <Text color="gray">{' Submit → '}</Text>
+        )}
       </Box>
 
       {q && (
@@ -2978,13 +2986,13 @@ function PlanClarifyPanel({
             {q.options.map((opt, i) => {
               const selected = i === optionIndex;
               return (
-                <Box key={opt.label} flexDirection="column" marginBottom={opt.description ? 0 : 0}>
-                  <Text color={selected ? 'magenta' : 'white'} bold={selected}>
+                <Box key={opt.label} flexDirection="column">
+                  <Text color={selected ? 'cyan' : 'white'} bold={selected}>
                     {selected ? '❯ ' : '  '}
                     {`${i + 1}. ${opt.label}`}
                   </Text>
                   {opt.description && (
-                    <Text color="gray">{`     ${opt.description}`}</Text>
+                    <Text color="gray" dimColor>{`     ${opt.description}`}</Text>
                   )}
                 </Box>
               );
@@ -3001,12 +3009,15 @@ function PlanClarifyPanel({
               {`  • ${qq.header}: ${state.answers[qq.id] ?? qq.defaultOption ?? qq.options[0]?.label ?? '…'}`}
             </Text>
           ))}
+          <Box marginTop={1}>
+            <Text color="cyan" bold>❯ Enter to build the plan</Text>
+          </Box>
         </Box>
       )}
 
       <Box marginTop={1}>
-        <Text color="gray">
-          Enter to select · Tab/Arrow keys to navigate · Esc to cancel
+        <Text color="gray" dimColor>
+          Enter to select · Tab / arrows to navigate · Esc to cancel
         </Text>
       </Box>
     </Box>

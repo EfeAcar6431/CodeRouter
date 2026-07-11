@@ -2403,6 +2403,27 @@ function App({ cwd, initialMode }: AppProps): React.ReactElement {
     }
   });
 
+  // Bottom-pin the chatbox (Claude-style): estimate how much vertical
+  // space the committed transcript + any in-flight thread already use,
+  // then insert a filler that pushes the footer to the terminal floor.
+  // When content overflows the screen the filler collapses to 0 and the
+  // transcript scrolls naturally into terminal scrollback via <Static>.
+  const termRows = process.stdout.rows ?? 40;
+  const termCols = process.stdout.columns ?? 80;
+  const committedLines = history.reduce(
+    (n, it) => n + estimateHistoryItemLines(it, termCols) + 1,
+    0,
+  );
+  const liveThreadLines = busy
+    ? liveLog.reduce((n, e) => n + estimateLogEntryLines(e) + 1, 0) + 3
+    : 0;
+  // chatbox (3) + status row (2) + a little breathing room.
+  const footerLines = 6;
+  const bottomFiller = Math.max(
+    0,
+    termRows - committedLines - liveThreadLines - footerLines - 1,
+  );
+
   return (
     <Box flexDirection="column">
       <Static items={history}>
@@ -2471,9 +2492,14 @@ function App({ cwd, initialMode }: AppProps): React.ReactElement {
         )}
       </Static>
 
-      {/* Live thread sits above the chatbox. Do NOT set height=rows /
-          flexGrow here — Ink + <Static> treats that as a full-viewport
-          frame and leaves a hollow split with a crushed side column. */}
+      {/* Filler pushes everything below to the terminal floor so the
+          chatbox reads as pinned. Collapses to 0 once real content
+          fills the screen (then <Static> handles scrollback). Do NOT
+          swap this for height=rows / flexGrow — Ink + <Static> renders
+          that as a full-viewport frame and leaves a hollow split. */}
+      {bottomFiller > 0 && <Box height={bottomFiller} flexShrink={0} />}
+
+      {/* Live thread sits above the chatbox. */}
       {busy && liveLog.length > 0 && (
         <Box flexDirection="column" marginBottom={1}>
           <LogStream entries={liveLog} />
@@ -2652,6 +2678,37 @@ function estimateLogEntryLines(e: LogEntry): number {
     return 2 + Math.min(bodyLines, MAX_BODY_LINES);
   }
   return 1;
+}
+
+/**
+ * Rough rendered-height estimate for one committed history item.
+ * Used only to compute the bottom-filler that pins the chatbox to the
+ * terminal floor - it doesn't need to be exact (a line or two off just
+ * nudges the input slightly), so we stay conservative and cheap.
+ */
+function estimateHistoryItemLines(item: HistoryItem, width: number): number {
+  switch (item.kind) {
+    case 'welcome': {
+      const wordmark = width >= 102 ? WORDMARK_PIXEL : WORDMARK_SMALL;
+      return wordmark.split('\n').length + 2 + 11;
+    }
+    case 'user':
+      return item.text.split('\n').length + 2;
+    case 'system':
+      return item.text.split('\n').length;
+    case 'report':
+      return item.text.split('\n').length;
+    case 'log':
+      return item.entries.reduce((n, e) => n + estimateLogEntryLines(e) + 1, 0);
+    case 'changes':
+      return item.stats.length + 2;
+    case 'question':
+      return 6;
+    case 'open-questions':
+      return item.questions.length + 3;
+    default:
+      return 1;
+  }
 }
 
 function ToolBlock({

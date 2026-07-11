@@ -322,6 +322,14 @@ function App({ cwd, initialMode, fullscreen: fullscreenInit }: AppProps): React.
   // follow the latest output. PgUp/PgDn adjust it; new activity resets
   // it so the newest content is always shown.
   const [scrollUp, setScrollUp] = useState(0);
+  // Measured heights of the fixed header + footer so the scroll viewport
+  // can be given an EXACT height. Ink only clips `overflow: hidden` when
+  // the box has a concrete height - with flexGrow it renders full height
+  // and overflowing lines collide. Seeded with estimates to avoid a
+  // first-frame overlap before the measure effect runs.
+  const headerRef = useRef<import('ink').DOMElement>(null);
+  const footerRef = useRef<import('ink').DOMElement>(null);
+  const [chromeH, setChromeH] = useState({ header: 20, footer: 6 });
   // Live terminal dimensions; re-read on SIGWINCH so the viewport and
   // the alt-screen grid track resizes.
   const [termSize, setTermSize] = useState<{ rows: number; cols: number }>({
@@ -363,6 +371,18 @@ function App({ cwd, initialMode, fullscreen: fullscreenInit }: AppProps): React.
   // NOTE: mouse-wheel handling lives in the keyboard handler (useInput)
   // below - Ink delivers the SGR sequence as `char`, so we detect and
   // swallow it there to both scroll and keep it out of the input box.
+
+  // Measure the fixed header + footer after each render so the viewport
+  // gets an exact height. Runs every render but only commits state when
+  // the numbers actually change, so it settles instead of looping.
+  useEffect(() => {
+    if (!fullscreen) return;
+    const header = headerRef.current ? measureElement(headerRef.current).height : chromeH.header;
+    const footer = footerRef.current ? measureElement(footerRef.current).height : chromeH.footer;
+    if (header !== chromeH.header || footer !== chromeH.footer) {
+      setChromeH({ header, footer });
+    }
+  });
 
   // Hydrate env from the credentials file once on mount. We do it inside
   // useState's initializer so the very first detectConfiguredProviders()
@@ -2645,30 +2665,33 @@ function App({ cwd, initialMode, fullscreen: fullscreenInit }: AppProps): React.
     // The wordmark/tips banner is a FIXED header at the top; the
     // scrollable transcript excludes it.
     const transcript = history.filter((it) => it.kind !== 'welcome');
-    // Estimate content vs. viewport height to clamp scroll-up so we
-    // never scroll past the top (which would show a blank viewport).
+    // Exact viewport height = terminal minus the measured header/footer.
+    const fsViewportH = Math.max(3, termSize.rows - chromeH.header - chromeH.footer);
     const fsContentLines =
       transcript.reduce((n, it) => n + estimateHistoryItemLines(it, termSize.cols) + 1, 0) +
       liveThreadLines;
-    const fsFooterLines = wizardStep === 'idle' ? 6 : 12;
-    const fsHeaderLines = estimateHistoryItemLines({ id: -1, kind: 'welcome' }, termSize.cols);
-    const fsViewportH = Math.max(3, termSize.rows - fsFooterLines - fsHeaderLines);
     const fsMaxScroll = Math.max(0, fsContentLines - fsViewportH);
     const fsScroll = Math.min(scrollUp, fsMaxScroll);
     return (
       <Box flexDirection="column" width={termSize.cols} height={termSize.rows}>
         {/* Fixed header — the CodeRouter wordmark stays pinned at the top. */}
-        <Box flexShrink={0} flexDirection="column">
+        <Box ref={headerRef} flexShrink={0} flexDirection="column">
           <WordmarkPanel />
           {!setupState.configured && setupState.hosts.length > 0 && (
             <DetectedHostsPanel hosts={setupState.hosts} />
           )}
           <TipsPanel mode={mode} />
         </Box>
-        <Box flexGrow={1} flexDirection="column" justifyContent="flex-end" overflow="hidden">
-          {/* marginBottom pushes content up by `fsScroll` lines inside the
-              bottom-anchored, clipped viewport — that's how scroll-up works
-              without needing exact measurement. */}
+        {/* Scroll viewport: EXPLICIT height so Ink actually clips the
+            overflow (flexGrow would render full height and lines would
+            collide). Bottom-anchored so newest output shows; marginBottom
+            scrolls up by clipping the bottom lines. */}
+        <Box
+          height={fsViewportH}
+          flexDirection="column"
+          justifyContent="flex-end"
+          overflow="hidden"
+        >
           <Box flexDirection="column" marginBottom={fsScroll}>
             {transcript.map((item) => (
               <Box key={item.id} flexDirection="column" marginBottom={1}>
@@ -2678,7 +2701,7 @@ function App({ cwd, initialMode, fullscreen: fullscreenInit }: AppProps): React.
             {liveThread}
           </Box>
         </Box>
-        <Box flexDirection="column" flexShrink={0}>
+        <Box ref={footerRef} flexDirection="column" flexShrink={0}>
           {fsScroll > 0 && (
             <Text color="magenta" dimColor>
               {`  ↑ scrolled up ${fsScroll} line${fsScroll === 1 ? '' : 's'} · PgDn to catch up`}

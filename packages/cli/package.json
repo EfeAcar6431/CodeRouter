@@ -1,6 +1,6 @@
 {
   "name": "coderouter-cli",
-  "version": "0.1.7",
+  "version": "0.1.8",
   "type": "module",
   "description": "A coding-agent router that picks the best model for each task, runs edits in git-worktree sandboxes, and works with your existing Claude Code / Codex CLI or any API key (OpenAI, Anthropic, OpenRouter, ...).",
   "license": "MIT",

@@ -6,6 +6,8 @@ import type {
   AskUserQuestionPayload,
   InjectionFinding,
   Mode,
+  PlanClarifyAnswer,
+  PlanClarifyQuestion,
   ProgressNotifier,
   ProviderId,
   RouteRef,
@@ -185,10 +187,27 @@ type HistoryItem =
   | { id: number; kind: 'question'; payload: AskUserQuestionPayload }
   | { id: number; kind: 'open-questions'; questions: string[] };
 
-type WizardStep = 'idle' | 'trust' | 'confirm' | 'pick' | 'key' | 'review' | 'plan-approve';
+type WizardStep =
+  | 'idle'
+  | 'trust'
+  | 'confirm'
+  | 'pick'
+  | 'key'
+  | 'review'
+  | 'plan-approve'
+  | 'plan-clarify';
 
 /** What to build/refine after a plan run, captured for the approval prompt. */
 type PlanApproveState = { planPath?: string; planId?: string; body: string; mode: string };
+
+/** Pre-plan Claude-style multi-choice clarify wizard. */
+type PlanClarifyState = {
+  prompt: string;
+  mode: Mode;
+  questions: PlanClarifyQuestion[];
+  /** Selected option label keyed by question id. */
+  answers: Record<string, string>;
+};
 
 const PLAN_APPROVE_OPTIONS = [
   'build now (auto-apply)',
@@ -197,6 +216,12 @@ const PLAN_APPROVE_OPTIONS = [
   'edit plan file',
   'give feedback',
 ];
+
+function defaultClarifyOptionIndex(q: PlanClarifyQuestion): number {
+  if (!q.defaultOption) return 0;
+  const i = q.options.findIndex((o) => o.label === q.defaultOption);
+  return i >= 0 ? i : 0;
+}
 
 /**
  * One entry in the unified live log: text spoken by the model and
@@ -411,6 +436,10 @@ function App({ cwd, initialMode }: AppProps): React.ReactElement {
   // once it's produced — build it, refine in the app, edit, or give feedback.
   const [planApprove, setPlanApprove] = useState<PlanApproveState | null>(null);
   const [planApproveChoice, setPlanApproveChoice] = useState(0);
+  // Pre-plan clarifying questions (Claude Code–style tabs + options).
+  const [planClarify, setPlanClarify] = useState<PlanClarifyState | null>(null);
+  const [clarifyQIdx, setClarifyQIdx] = useState(0);
+  const [clarifyOptIdx, setClarifyOptIdx] = useState(0);
   // Currently-routed model + provider, populated by the agent
   // mode's progress notifier the moment the router picks. The REPL
   // stamps every log entry with a short label (e.g. `claude:opus-4`)
@@ -784,10 +813,9 @@ function App({ cwd, initialMode }: AppProps): React.ReactElement {
    */
   function flushLiveOverflowToHistory(): void {
     const rows = process.stdout.rows ?? 40;
-    // Reserve room for: spinner row, esc-hint row, blank line,
-    // chatbox (3 lines), status row. Conservative on small
-    // terminals, generous on large ones.
-    const reserved = 8;
+    // Reserve room for: spinner row, esc-hint, blank line,
+    // chatbox, status row, and the pinned footer margin.
+    const reserved = 12;
     const maxLines = Math.max(8, rows - reserved);
 
     // Cheap height estimate. Doesn't account for terminal width
@@ -895,7 +923,12 @@ function App({ cwd, initialMode }: AppProps): React.ReactElement {
     pushSystem(lines.join('\n'), worst);
   }
 
-  async function dispatch(prompt: string, modeOverride?: Mode, applyOverride?: boolean): Promise<void> {
+  async function dispatch(
+    prompt: string,
+    modeOverride?: Mode,
+    applyOverride?: boolean,
+    clarificationAnswers?: PlanClarifyAnswer[],
+  ): Promise<void> {
     const m = modeOverride ?? mode;
     setBusy(true);
     setPhase('preparing');
@@ -1002,6 +1035,9 @@ function App({ cwd, initialMode }: AppProps): React.ReactElement {
         // hands the (post-snapshot) handle back via
         // `Report.worktree` for the next turn to pick up.
         keepWorktree: true,
+        // Interactive REPL: plan mode may pause for Claude-style Q&A.
+        interactive: true,
+        clarificationAnswers,
         progress: { notifier, close: () => {} },
         signal: controller.signal,
         onChunk: (chunk) => {
@@ -1125,6 +1161,26 @@ function App({ cwd, initialMode }: AppProps): React.ReactElement {
         ]);
       }
 
+      // Claude-style pre-plan Q&A: pause here and open the clarify
+      // wizard instead of drafting. Re-dispatch with answers later.
+      if (
+        !controller.signal.aborted &&
+        report.status === 'partial' &&
+        report.clarifyQuestions &&
+        report.clarifyQuestions.length > 0
+      ) {
+        const qs = report.clarifyQuestions;
+        setPlanClarify({
+          prompt,
+          mode: m,
+          questions: qs,
+          answers: {},
+        });
+        setClarifyQIdx(0);
+        setClarifyOptIdx(defaultClarifyOptionIndex(qs[0]!));
+        setWizardStep('plan-clarify');
+        pushSystem('  clarifying before drafting — pick an option for each question', 'info');
+      } else {
       // Compact per-file change summary, plus a deletion check used
       // below to decide whether we can auto-apply silently.
       let postRunArtifact: RecordedRun | null = null;
@@ -1250,6 +1306,7 @@ function App({ cwd, initialMode }: AppProps): React.ReactElement {
           setWizardStep('review');
         }
       }
+      } // end else (not pre-plan clarify)
 
       // Roll this run's authoritative numbers (from the final
       // report - more accurate than the streaming estimate the
@@ -1442,6 +1499,65 @@ function App({ cwd, initialMode }: AppProps): React.ReactElement {
     // already in the conversation, so the next message refines it.
     setMode('plan');
     pushSystem("  plan mode — type what you'd like to change and I'll refine the plan", 'info');
+  }
+
+  /** Lock the current option and advance (or submit on last / Submit tab). */
+  function advancePlanClarify(selectedLabel?: string): void {
+    const state = planClarify;
+    if (!state) return;
+    const questions = state.questions;
+    const submitIdx = questions.length; // virtual "Submit" tab
+    const onSubmitTab = clarifyQIdx >= submitIdx;
+
+    let answers = { ...state.answers };
+    if (!onSubmitTab) {
+      const q = questions[clarifyQIdx];
+      if (!q) return;
+      const label =
+        selectedLabel ??
+        q.options[clarifyOptIdx]?.label ??
+        q.defaultOption ??
+        q.options[0]?.label ??
+        '';
+      answers = { ...answers, [q.id]: label };
+      setPlanClarify({ ...state, answers });
+    }
+
+    if (!onSubmitTab && clarifyQIdx < questions.length - 1) {
+      const next = clarifyQIdx + 1;
+      setClarifyQIdx(next);
+      setClarifyOptIdx(defaultClarifyOptionIndex(questions[next]!));
+      return;
+    }
+
+    // Move to Submit tab after last question, or submit from Submit tab.
+    if (!onSubmitTab && clarifyQIdx === questions.length - 1) {
+      setClarifyQIdx(submitIdx);
+      return;
+    }
+
+    // Fill any unanswered with defaults, then re-dispatch.
+    const filled: PlanClarifyAnswer[] = questions.map((q) => {
+      const answer =
+        answers[q.id] ??
+        q.defaultOption ??
+        q.options[0]?.label ??
+        '';
+      return { questionId: q.id, header: q.header, answer };
+    });
+    const summary = filled.map((a) => `  • ${a.header}: ${a.answer}`).join('\n');
+    pushSystem(`  clarifications:\n${summary}`, 'success');
+    const prompt = state.prompt;
+    const modeForRun = state.mode;
+    setPlanClarify(null);
+    setWizardStep('idle');
+    void dispatch(prompt, modeForRun, undefined, filled);
+  }
+
+  function cancelPlanClarify(): void {
+    setPlanClarify(null);
+    setWizardStep('idle');
+    pushSystem('  clarify cancelled — type a prompt to try again', 'warn');
   }
 
   function startSetupWizard(): void {
@@ -2061,6 +2177,65 @@ function App({ cwd, initialMode }: AppProps): React.ReactElement {
       return;
     }
 
+    // Wizard: pre-plan clarifying questions (Claude Code–style).
+    // Tabs = questions + Submit; ↑↓ options; Enter selects / advances;
+    // Tab cycles tabs; 1-N shortcuts; Esc cancels.
+    if (wizardStep === 'plan-clarify') {
+      const state = planClarify;
+      if (!state) {
+        setWizardStep('idle');
+        return;
+      }
+      const questions = state.questions;
+      const submitIdx = questions.length;
+      const onSubmit = clarifyQIdx >= submitIdx;
+      const q = onSubmit ? null : questions[clarifyQIdx];
+      const optCount = q?.options.length ?? 0;
+
+      if (key.escape) {
+        cancelPlanClarify();
+        return;
+      }
+      if (key.upArrow && q && optCount > 0) {
+        setClarifyOptIdx((i) => (i + optCount - 1) % optCount);
+        return;
+      }
+      if (key.downArrow && q && optCount > 0) {
+        setClarifyOptIdx((i) => (i + 1) % optCount);
+        return;
+      }
+      if (key.tab && key.shift) {
+        const next = (clarifyQIdx + submitIdx) % (submitIdx + 1);
+        setClarifyQIdx(next);
+        if (next < questions.length) {
+          setClarifyOptIdx(defaultClarifyOptionIndex(questions[next]!));
+        }
+        return;
+      }
+      if (key.tab) {
+        const next = (clarifyQIdx + 1) % (submitIdx + 1);
+        setClarifyQIdx(next);
+        if (next < questions.length) {
+          setClarifyOptIdx(defaultClarifyOptionIndex(questions[next]!));
+        }
+        return;
+      }
+      if (q && char && char >= '1' && char <= String(optCount)) {
+        const idx = Number(char) - 1;
+        const label = q.options[idx]?.label;
+        if (label) {
+          setClarifyOptIdx(idx);
+          advancePlanClarify(label);
+        }
+        return;
+      }
+      if (key.return) {
+        advancePlanClarify();
+        return;
+      }
+      return;
+    }
+
     // Wizard: api key entry (masked)
     if (wizardStep === 'key') {
       if (key.escape) {
@@ -2228,7 +2403,7 @@ function App({ cwd, initialMode }: AppProps): React.ReactElement {
   });
 
   return (
-    <Box flexDirection="column">
+    <Box flexDirection="column" height={process.stdout.rows}>
       <Static items={history}>
         {(item) => (
           <Box key={item.id} flexDirection="column" marginBottom={1}>
@@ -2295,104 +2470,105 @@ function App({ cwd, initialMode }: AppProps): React.ReactElement {
         )}
       </Static>
 
-      {/* The "thread" area: live log first (text streamed by the
-          model + tool calls in arrival order), then the spinner +
-          esc-hint row. Both sit ABOVE the chatbox so the chatbox
-          is always free to accept input - even mid-run. Mirrors
-          Claude Code where the spinner reads as a thread entry,
-          not a footer attached to the input. */}
-      {busy && liveLog.length > 0 && (
-        <Box flexDirection="column" marginBottom={1}>
-          <LogStream entries={liveLog} />
-        </Box>
-      )}
-      {busy && (
-        <Box flexDirection="column" marginBottom={1}>
-          <ProgressLine
-            phase={aborting ? 'aborting…' : phase}
-            routeLabel={formatRouteLabel(currentRoute) ?? undefined}
-            usage={runningUsage}
-            aborting={aborting}
-          />
-          <Box paddingX={1}>
-            <Text color="gray" dimColor>
-              {aborting ? 'sending SIGTERM, force-kill in 2s' : 'esc to interrupt'}
-            </Text>
+      {/* Growable thread: live log + spinner. flexGrow pins the
+          footer (wizards / chatbox) to the bottom of the terminal. */}
+      <Box flexDirection="column" flexGrow={1}>
+        {busy && liveLog.length > 0 && (
+          <Box flexDirection="column" marginBottom={1}>
+            <LogStream entries={liveLog} />
           </Box>
-        </Box>
-      )}
-
-      {wizardStep === 'trust' && <TrustPanel cwd={cwd} choice={trustChoice} />}
-      {wizardStep === 'confirm' && <WizardConfirmPanel choice={confirmChoice} />}
-      {wizardStep === 'pick' && (
-        <SetupManagerPanel rows={managerRows} selectedIdx={wizardPick} />
-      )}
-      {wizardStep === 'key' && wizardProvider && (
-        <WizardKeyPanel provider={wizardProvider} maskedKey={mask(wizardKey)} />
-      )}
-      {wizardStep === 'review' && reviewRun && (
-        <ApprovePromptPanel run={reviewRun} choice={reviewChoice} />
-      )}
-      {wizardStep === 'plan-approve' && planApprove && (
-        <PlanApprovePanel state={planApprove} choice={planApproveChoice} />
-      )}
-
-      {showSuggestions && !busy && suggestions.length > 0 && (
-        <SuggestionsList items={suggestions} selectedIdx={suggIdx} />
-      )}
-
-      {showMentions && (
-        <MentionsList items={mentionSuggestions} selectedIdx={suggIdx} />
-      )}
-
-      {/* The chatbox + status footer are intentionally hidden while
-          the wizard owns input. Bringing them back at this point
-          would just confuse — the wizard panels already carry
-          their own hints. */}
-      {wizardStep === 'idle' && (
-        <>
-          {!setupState.configured && !busy && <NoProviderReminder />}
-          {/* Persistent inline hint while a model question is open.
-              The full question is in scrollback as a `question`
-              history item; this is just a one-liner reminding the
-              user that anything they type next is the answer. */}
-          {pendingQuestion && !busy && (
+        )}
+        {busy && (
+          <Box flexDirection="column" marginBottom={1}>
+            <ProgressLine
+              phase={aborting ? 'aborting…' : phase}
+              routeLabel={formatRouteLabel(currentRoute) ?? undefined}
+              usage={runningUsage}
+              aborting={aborting}
+            />
             <Box paddingX={1}>
-              <Text color="yellow" bold>{'? answering: '}</Text>
-              <Text>{truncateOneLine(pendingQuestion.questions[0]?.question ?? '', 80)}</Text>
+              <Text color="gray" dimColor>
+                {aborting ? 'sending SIGTERM, force-kill in 2s' : 'esc to interrupt'}
+              </Text>
             </Box>
-          )}
-          {queuedPrompt && (
-            <Box paddingX={1}>
-              <Text color="cyan" bold>{'↑ queued '}</Text>
-              <Text>{truncateOneLine(queuedPrompt, 80)}</Text>
-              <Text color="gray" dimColor>{'   esc to clear'}</Text>
-            </Box>
-          )}
-          <InputBox
-            value={input}
-            cursor={cursor}
-            busy={busy}
-            configured={setupState.configured}
+          </Box>
+        )}
+      </Box>
+
+      {/* Fixed footer: wizards + chatbox stay at the bottom. */}
+      <Box flexDirection="column" flexShrink={0}>
+        {wizardStep === 'trust' && <TrustPanel cwd={cwd} choice={trustChoice} />}
+        {wizardStep === 'confirm' && <WizardConfirmPanel choice={confirmChoice} />}
+        {wizardStep === 'pick' && (
+          <SetupManagerPanel rows={managerRows} selectedIdx={wizardPick} />
+        )}
+        {wizardStep === 'key' && wizardProvider && (
+          <WizardKeyPanel provider={wizardProvider} maskedKey={mask(wizardKey)} />
+        )}
+        {wizardStep === 'review' && reviewRun && (
+          <ApprovePromptPanel run={reviewRun} choice={reviewChoice} />
+        )}
+        {wizardStep === 'plan-approve' && planApprove && (
+          <PlanApprovePanel state={planApprove} choice={planApproveChoice} />
+        )}
+        {wizardStep === 'plan-clarify' && planClarify && (
+          <PlanClarifyPanel
+            state={planClarify}
+            questionIndex={clarifyQIdx}
+            optionIndex={clarifyOptIdx}
           />
-          {!busy && (
-            <Box marginTop={1} paddingX={1} flexDirection="column">
-              <StatusRow
-                mode={mode}
-                effort={effort}
-                apply={apply}
-                fast={fast}
-                security={securityPolicy}
-                apiKeys={setupState.apiKeys}
-                hosts={setupState.hosts}
-              />
-              {(sessionUsage.tokensIn > 0 || sessionUsage.tokensOut > 0) && (
-                <Text color="gray">{`session ${formatUsage(sessionUsage)}`}</Text>
-              )}
-            </Box>
-          )}
-        </>
-      )}
+        )}
+
+        {showSuggestions && !busy && suggestions.length > 0 && (
+          <SuggestionsList items={suggestions} selectedIdx={suggIdx} />
+        )}
+
+        {showMentions && (
+          <MentionsList items={mentionSuggestions} selectedIdx={suggIdx} />
+        )}
+
+        {/* Chatbox hidden while a wizard owns the keyboard. */}
+        {wizardStep === 'idle' && (
+          <>
+            {!setupState.configured && !busy && <NoProviderReminder />}
+            {pendingQuestion && !busy && (
+              <Box paddingX={1}>
+                <Text color="yellow" bold>{'? answering: '}</Text>
+                <Text>{truncateOneLine(pendingQuestion.questions[0]?.question ?? '', 80)}</Text>
+              </Box>
+            )}
+            {queuedPrompt && (
+              <Box paddingX={1}>
+                <Text color="cyan" bold>{'↑ queued '}</Text>
+                <Text>{truncateOneLine(queuedPrompt, 80)}</Text>
+                <Text color="gray" dimColor>{'   esc to clear'}</Text>
+              </Box>
+            )}
+            <InputBox
+              value={input}
+              cursor={cursor}
+              busy={busy}
+              configured={setupState.configured}
+            />
+            {!busy && (
+              <Box marginTop={1} paddingX={1} flexDirection="column">
+                <StatusRow
+                  mode={mode}
+                  effort={effort}
+                  apply={apply}
+                  fast={fast}
+                  security={securityPolicy}
+                  apiKeys={setupState.apiKeys}
+                  hosts={setupState.hosts}
+                />
+                {(sessionUsage.tokensIn > 0 || sessionUsage.tokensOut > 0) && (
+                  <Text color="gray">{`session ${formatUsage(sessionUsage)}`}</Text>
+                )}
+              </Box>
+            )}
+          </>
+        )}
+      </Box>
     </Box>
   );
 }
@@ -2757,6 +2933,84 @@ function PlanApprovePanel({
       </Box>
       <Box marginTop={1}>
         <Text color="gray">↑ ↓ to choose · 1-5 shortcuts · enter to confirm · type to refine · esc to dismiss</Text>
+      </Box>
+    </Box>
+  );
+}
+
+/**
+ * Claude Code–style plan clarifying questions: horizontal tabs for
+ * each question (+ Submit), numbered options with descriptions.
+ */
+function PlanClarifyPanel({
+  state,
+  questionIndex,
+  optionIndex,
+}: {
+  state: PlanClarifyState;
+  questionIndex: number;
+  optionIndex: number;
+}): React.ReactElement {
+  const questions = state.questions;
+  const submitIdx = questions.length;
+  const onSubmit = questionIndex >= submitIdx;
+  const q = onSubmit ? null : questions[questionIndex];
+
+  return (
+    <Box borderStyle="round" borderColor="magenta" paddingX={2} marginBottom={1} flexDirection="column">
+      <Box>
+        {questions.map((qq, i) => {
+          const active = i === questionIndex;
+          const answered = Boolean(state.answers[qq.id]);
+          return (
+            <Text key={qq.id} color={active ? 'magenta' : answered ? 'green' : 'gray'} bold={active}>
+              {i === 0 ? '' : '  '}
+              {`${i + 1}. ${qq.header}`}
+            </Text>
+          );
+        })}
+        <Text color={onSubmit ? 'magenta' : 'gray'} bold={onSubmit}>
+          {`  ${submitIdx + 1}. Submit`}
+        </Text>
+      </Box>
+
+      {q && (
+        <Box marginTop={1} flexDirection="column">
+          <Text bold>{q.question}</Text>
+          <Box marginTop={1} flexDirection="column">
+            {q.options.map((opt, i) => {
+              const selected = i === optionIndex;
+              return (
+                <Box key={opt.label} flexDirection="column" marginBottom={opt.description ? 0 : 0}>
+                  <Text color={selected ? 'magenta' : 'white'} bold={selected}>
+                    {selected ? '❯ ' : '  '}
+                    {`${i + 1}. ${opt.label}`}
+                  </Text>
+                  {opt.description && (
+                    <Text color="gray">{`     ${opt.description}`}</Text>
+                  )}
+                </Box>
+              );
+            })}
+          </Box>
+        </Box>
+      )}
+
+      {onSubmit && (
+        <Box marginTop={1} flexDirection="column">
+          <Text bold>Ready to draft the plan with:</Text>
+          {questions.map((qq) => (
+            <Text key={qq.id} color="gray">
+              {`  • ${qq.header}: ${state.answers[qq.id] ?? qq.defaultOption ?? qq.options[0]?.label ?? '…'}`}
+            </Text>
+          ))}
+        </Box>
+      )}
+
+      <Box marginTop={1}>
+        <Text color="gray">
+          Enter to select · Tab/Arrow keys to navigate · Esc to cancel
+        </Text>
       </Box>
     </Box>
   );

@@ -132,6 +132,14 @@ export type CliRunOpts = {
    * When unset the mode defaults to `sandboxed` (isolated worktree).
    */
   runMode?: import('@coderouter/core').RunMode;
+  /**
+   * Interactive REPL flag — enables the pre-plan clarify gate.
+   */
+  interactive?: boolean;
+  /**
+   * Answers from a prior clarify round (plan mode).
+   */
+  clarificationAnswers?: import('@coderouter/core').PlanClarifyAnswer[];
 };
 
 /**
@@ -214,6 +222,8 @@ export async function executeRun(opts: CliRunOpts): Promise<{
         keepWorktree: opts.keepWorktree,
         priorMessages: opts.priorMessages,
         runMode: opts.runMode,
+        interactive: opts.interactive,
+        clarificationAnswers: opts.clarificationAnswers,
       },
       {
         registry,

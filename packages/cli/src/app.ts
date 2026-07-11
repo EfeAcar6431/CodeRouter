@@ -36,8 +36,12 @@ export async function runCli(argv: string[]): Promise<void> {
     .command('repl', { isDefault: true })
     .description('start interactive CodeRouter REPL')
     .option('-c, --cwd <path>', 'working directory', process.cwd())
-    .action(async (opts: { cwd?: string }) => {
-      await runReplCommand({ cwd: opts.cwd ?? process.cwd() });
+    .option('--fullscreen', 'fixed-input fullscreen renderer (alternate screen)', false)
+    .action(async (opts: { cwd?: string; fullscreen?: boolean }) => {
+      await runReplCommand({
+        cwd: opts.cwd ?? process.cwd(),
+        fullscreen: opts.fullscreen,
+      });
     });
 
   // Top-level: run once and exit

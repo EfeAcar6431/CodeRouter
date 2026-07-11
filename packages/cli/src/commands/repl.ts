@@ -11,6 +11,8 @@ import { runInkRepl } from '../ui/repl-app.js';
 export type ReplOpts = {
   cwd: string;
   initialMode?: Mode;
+  /** Start in the alternate-screen fullscreen renderer (fixed input). */
+  fullscreen?: boolean;
 };
 
 /**
@@ -22,7 +24,8 @@ export type ReplOpts = {
  */
 export async function runReplCommand(opts: ReplOpts): Promise<void> {
   if (process.stdin.isTTY && process.stdout.isTTY && !process.env.CODEROUTER_NO_TUI) {
-    await runInkRepl({ cwd: opts.cwd, initialMode: opts.initialMode });
+    const fullscreen = opts.fullscreen || process.env.CODEROUTER_FULLSCREEN === '1';
+    await runInkRepl({ cwd: opts.cwd, initialMode: opts.initialMode, fullscreen });
     return;
   }
   await runReadlineRepl(opts);

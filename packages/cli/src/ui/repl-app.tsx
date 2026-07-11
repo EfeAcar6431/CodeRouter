@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import React, { Fragment, useEffect, useMemo, useRef, useState } from 'react';
-import { Box, Static, Text, render, useApp, useInput } from 'ink';
+import { Box, Static, Text, measureElement, render, useApp, useInput, useStdout } from 'ink';
 import type {
   ActivityEvent,
   AskUserQuestionPayload,
@@ -106,6 +106,7 @@ const COMMANDS: CommandDef[] = [
   { name: 'accept', hint: '[runId]', desc: 'apply a saved run (latest if omitted)' },
   { name: 'reject', hint: '[runId]', desc: 'discard a saved run' },
   { name: 'trust', hint: '', desc: "trust edits for this session (don't ask again)" },
+  { name: 'tui', hint: 'fullscreen|classic', desc: 'toggle the fixed-input fullscreen renderer' },
   { name: 'clear', hint: '', desc: 'clear scrollback' },
   { name: 'help', hint: '', desc: 'show this help' },
   { name: 'exit', hint: '', desc: 'quit the REPL' },
@@ -303,10 +304,57 @@ function describeProgress(phase: string): string {
 type AppProps = {
   cwd: string;
   initialMode?: Mode;
+  /** Start in the alternate-screen fullscreen renderer (opt-in). */
+  fullscreen?: boolean;
 };
 
-function App({ cwd, initialMode }: AppProps): React.ReactElement {
+function App({ cwd, initialMode, fullscreen: fullscreenInit }: AppProps): React.ReactElement {
   const { exit } = useApp();
+  const { stdout } = useStdout();
+
+  // Fullscreen (alternate-screen) renderer: input is pinned in reserved
+  // bottom rows and the transcript is an app-owned viewport, so output
+  // never pushes the chatbox down. Off by default (classic renderer
+  // keeps everything in native terminal scrollback). Toggle at runtime
+  // with `/tui fullscreen|classic`.
+  const [fullscreen, setFullscreen] = useState(Boolean(fullscreenInit));
+  // Lines scrolled UP from the bottom in the fullscreen viewport. 0 =
+  // follow the latest output. PgUp/PgDn adjust it; new activity resets
+  // it so the newest content is always shown.
+  const [scrollUp, setScrollUp] = useState(0);
+  // Live terminal dimensions; re-read on SIGWINCH so the viewport and
+  // the alt-screen grid track resizes.
+  const [termSize, setTermSize] = useState<{ rows: number; cols: number }>({
+    rows: stdout?.rows ?? 40,
+    cols: stdout?.columns ?? 80,
+  });
+  useEffect(() => {
+    if (!stdout) return;
+    const onResize = (): void => {
+      setTermSize({ rows: stdout.rows ?? 40, cols: stdout.columns ?? 80 });
+    };
+    stdout.on('resize', onResize);
+    return () => {
+      stdout.off('resize', onResize);
+    };
+  }, [stdout]);
+
+  // Enter/leave the alternate screen buffer around fullscreen mode.
+  // ESC[?1049h switches to the alt buffer (like vim/less); ESC[?1049l
+  // restores the user's shell scrollback on exit or when toggling back
+  // to classic. Guard on a process-exit hook too so a crash restores it.
+  useEffect(() => {
+    if (!fullscreen || !stdout) return;
+    stdout.write('\x1b[?1049h\x1b[H');
+    const restore = (): void => {
+      stdout.write('\x1b[?1049l');
+    };
+    process.on('exit', restore);
+    return () => {
+      restore();
+      process.off('exit', restore);
+    };
+  }, [fullscreen, stdout]);
 
   // Hydrate env from the credentials file once on mount. We do it inside
   // useState's initializer so the very first detectConfiguredProviders()
@@ -933,6 +981,8 @@ function App({ cwd, initialMode }: AppProps): React.ReactElement {
     const m = modeOverride ?? mode;
     setBusy(true);
     setPhase('preparing');
+    // Snap the fullscreen viewport back to the latest output.
+    setScrollUp(0);
     liveLogRef.current = [];
     setLiveLog([]);
     // Each dispatch starts with a fresh per-run usage counter so the
@@ -1653,6 +1703,20 @@ function App({ cwd, initialMode }: AppProps): React.ReactElement {
         setHistory([]);
         conversationHistoryRef.current.reset();
         return;
+      case 'tui': {
+        const want = arg.trim().toLowerCase();
+        if (want === 'fullscreen' || want === 'full' || want === 'on') {
+          setFullscreen(true);
+          pushSystem('  fullscreen renderer on — input pinned at the bottom (/tui classic to revert)', 'success');
+        } else if (want === 'classic' || want === 'off') {
+          setFullscreen(false);
+          pushSystem('  classic renderer on — output flows into terminal scrollback', 'success');
+        } else {
+          setFullscreen((f) => !f);
+          pushSystem('  toggled TUI renderer (usage: /tui fullscreen|classic)', 'info');
+        }
+        return;
+      }
       case 'setup':
         startSetupWizard();
         return;
@@ -1971,6 +2035,15 @@ function App({ cwd, initialMode }: AppProps): React.ReactElement {
         void dash.close().catch(() => {});
       }
       exit();
+      return;
+    }
+
+    // Fullscreen viewport scrollback: PgUp/PgDn page through the
+    // transcript; the input keeps focus. Only meaningful in fullscreen
+    // (classic uses the terminal's own scrollback).
+    if (fullscreen && (key.pageUp || key.pageDown)) {
+      const page = Math.max(1, (termSize.rows ?? 40) - 8);
+      setScrollUp((s) => Math.max(0, s + (key.pageUp ? page : -page)));
       return;
     }
 
@@ -2429,82 +2502,10 @@ function App({ cwd, initialMode }: AppProps): React.ReactElement {
     termRows - committedLines - liveThreadLines - footerLines - preFrameReserve,
   );
 
-  return (
-    <Box flexDirection="column">
-      <Static items={history}>
-        {(item) => (
-          <Box key={item.id} flexDirection="column" marginBottom={1}>
-            {/* The welcome row is committed once at mount via the
-                seed history item. Putting wordmark + detected hosts
-                + tips inside <Static> means Ink writes them to
-                scrollback exactly once and never repaints them, so
-                they stay pinned at the top of the session while user
-                prompts, streamed answers, and reports stack below. */}
-            {item.kind === 'welcome' && (
-              <Box flexDirection="column">
-                <WordmarkPanel />
-                {/* The detected-hosts panel is part of first-run
-                    onboarding - it teaches the user which local
-                    CLIs were found and how to add API keys. Once
-                    they have at least one configured provider
-                    (host or API key) they've completed setup and
-                    don't need to see this box on every launch.
-                    StatusRow's `providers` chip already tells
-                    them what's active. */}
-                {!setupState.configured && setupState.hosts.length > 0 && (
-                  <DetectedHostsPanel hosts={setupState.hosts} />
-                )}
-                <TipsPanel mode={mode} />
-              </Box>
-            )}
-            {/* Grey-bordered box around every user prompt so the
-                operator can scan their own messages at a glance and
-                tell them apart from system output, model narration,
-                and tool calls. We keep the leading `▸ ` glyph for
-                consistency with the live chatbox prefix. */}
-            {item.kind === 'user' && (
-              <Box borderStyle="round" borderColor="gray" paddingX={1}>
-                <Text>
-                  <Text color="green" bold>{'▸ '}</Text>
-                  <Text bold>{item.text}</Text>
-                </Text>
-              </Box>
-            )}
-            {item.kind === 'system' && (
-              <Text
-                color={
-                  item.tone === 'error' ? 'red'
-                    : item.tone === 'warn' ? 'yellow'
-                    : item.tone === 'success' ? 'green'
-                    : 'gray'
-                }
-              >
-                {item.text}
-              </Text>
-            )}
-            {item.kind === 'log' && <LogStream entries={item.entries} frozen />}
-            {item.kind === 'changes' && <ChangesPanel stats={item.stats} />}
-            {item.kind === 'question' && <QuestionPanel payload={item.payload} />}
-            {item.kind === 'open-questions' && <OpenQuestionsPanel questions={item.questions} />}
-            {item.kind === 'report' && (
-              <Box flexDirection="column">
-                {item.text.split('\n').map((l, i) => (
-                  <Text key={`${item.id}-${i}`}>{colorizeReportLine(l)}</Text>
-                ))}
-              </Box>
-            )}
-          </Box>
-        )}
-      </Static>
-
-      {/* Filler pushes everything below to the terminal floor so the
-          chatbox reads as pinned. Collapses to 0 once real content
-          fills the screen (then <Static> handles scrollback). Do NOT
-          swap this for height=rows / flexGrow — Ink + <Static> renders
-          that as a full-viewport frame and leaves a hollow split. */}
-      {bottomFiller > 0 && <Box height={bottomFiller} flexShrink={0} />}
-
-      {/* Live thread sits above the chatbox. */}
+  // The live in-flight thread (streamed text/tools + spinner). Shared
+  // between both renderers.
+  const liveThread = (
+    <>
       {busy && liveLog.length > 0 && (
         <Box flexDirection="column" marginBottom={1}>
           <LogStream entries={liveLog} />
@@ -2525,7 +2526,13 @@ function App({ cwd, initialMode }: AppProps): React.ReactElement {
           </Box>
         </Box>
       )}
+    </>
+  );
 
+  // Wizards + chatbox + status row. Shared footer for both renderers;
+  // in fullscreen it lives in the reserved bottom rows.
+  const footer = (
+    <>
       {wizardStep === 'trust' && <TrustPanel cwd={cwd} choice={trustChoice} />}
       {wizardStep === 'confirm' && <WizardConfirmPanel choice={confirmChoice} />}
       {wizardStep === 'pick' && (
@@ -2589,6 +2596,7 @@ function App({ cwd, initialMode }: AppProps): React.ReactElement {
                 security={securityPolicy}
                 apiKeys={setupState.apiKeys}
                 hosts={setupState.hosts}
+                fullscreen={fullscreen}
               />
               {(sessionUsage.tokensIn > 0 || sessionUsage.tokensOut > 0) && (
                 <Text color="gray">{`session ${formatUsage(sessionUsage)}`}</Text>
@@ -2597,8 +2605,138 @@ function App({ cwd, initialMode }: AppProps): React.ReactElement {
           )}
         </>
       )}
+    </>
+  );
+
+  // Fullscreen renderer: alt-screen grid. The transcript is an
+  // app-owned viewport pinned to the bottom (justifyContent=flex-end +
+  // overflow hidden), so new output fills upward and the footer never
+  // moves. No <Static> here - we own the whole surface.
+  if (fullscreen) {
+    // Estimate content vs. viewport height to clamp scroll-up so we
+    // never scroll past the top (which would show a blank viewport).
+    const fsContentLines =
+      history.reduce((n, it) => n + estimateHistoryItemLines(it, termSize.cols) + 1, 0) +
+      liveThreadLines;
+    const fsFooterLines = wizardStep === 'idle' ? 6 : 12;
+    const fsViewportH = Math.max(3, termSize.rows - fsFooterLines);
+    const fsMaxScroll = Math.max(0, fsContentLines - fsViewportH);
+    const fsScroll = Math.min(scrollUp, fsMaxScroll);
+    return (
+      <Box flexDirection="column" width={termSize.cols} height={termSize.rows}>
+        <Box flexGrow={1} flexDirection="column" justifyContent="flex-end" overflow="hidden">
+          {/* marginBottom pushes content up by `fsScroll` lines inside the
+              bottom-anchored, clipped viewport — that's how scroll-up works
+              without needing exact measurement. */}
+          <Box flexDirection="column" marginBottom={fsScroll}>
+            {history.map((item) => (
+              <Box key={item.id} flexDirection="column" marginBottom={1}>
+                <HistoryItemBody item={item} setupState={setupState} mode={mode} />
+              </Box>
+            ))}
+            {liveThread}
+          </Box>
+        </Box>
+        <Box flexDirection="column" flexShrink={0}>
+          {fsScroll > 0 && (
+            <Text color="magenta" dimColor>
+              {`  ↑ scrolled up ${fsScroll} line${fsScroll === 1 ? '' : 's'} · PgDn to catch up`}
+            </Text>
+          )}
+          {footer}
+        </Box>
+      </Box>
+    );
+  }
+
+  return (
+    <Box flexDirection="column">
+      <Static items={history}>
+        {(item) => (
+          <Box key={item.id} flexDirection="column" marginBottom={1}>
+            <HistoryItemBody item={item} setupState={setupState} mode={mode} />
+          </Box>
+        )}
+      </Static>
+
+      {/* Filler pushes everything below to the terminal floor so the
+          chatbox reads as pinned. Collapses to 0 once real content
+          fills the screen (then <Static> handles scrollback). Do NOT
+          swap this for height=rows / flexGrow — Ink + <Static> renders
+          that as a full-viewport frame and leaves a hollow split. */}
+      {bottomFiller > 0 && <Box height={bottomFiller} flexShrink={0} />}
+
+      {liveThread}
+      {footer}
     </Box>
   );
+}
+
+/**
+ * Renders the body of one transcript item. Shared by the classic
+ * (<Static>) renderer and the fullscreen viewport so both stay in sync.
+ */
+function HistoryItemBody({
+  item,
+  setupState,
+  mode,
+}: {
+  item: HistoryItem;
+  setupState: ReturnType<typeof detectConfiguredProviders>;
+  mode: Mode;
+}): React.ReactElement | null {
+  switch (item.kind) {
+    case 'welcome':
+      return (
+        <Box flexDirection="column">
+          <WordmarkPanel />
+          {!setupState.configured && setupState.hosts.length > 0 && (
+            <DetectedHostsPanel hosts={setupState.hosts} />
+          )}
+          <TipsPanel mode={mode} />
+        </Box>
+      );
+    case 'user':
+      return (
+        <Box borderStyle="round" borderColor="gray" paddingX={1}>
+          <Text>
+            <Text color="green" bold>{'▸ '}</Text>
+            <Text bold>{item.text}</Text>
+          </Text>
+        </Box>
+      );
+    case 'system':
+      return (
+        <Text
+          color={
+            item.tone === 'error' ? 'red'
+              : item.tone === 'warn' ? 'yellow'
+                : item.tone === 'success' ? 'green'
+                  : 'gray'
+          }
+        >
+          {item.text}
+        </Text>
+      );
+    case 'log':
+      return <LogStream entries={item.entries} frozen />;
+    case 'changes':
+      return <ChangesPanel stats={item.stats} />;
+    case 'question':
+      return <QuestionPanel payload={item.payload} />;
+    case 'open-questions':
+      return <OpenQuestionsPanel questions={item.questions} />;
+    case 'report':
+      return (
+        <Box flexDirection="column">
+          {item.text.split('\n').map((l, i) => (
+            <Text key={`${item.id}-${i}`}>{colorizeReportLine(l)}</Text>
+          ))}
+        </Box>
+      );
+    default:
+      return null;
+  }
 }
 
 /**
@@ -3579,6 +3717,7 @@ function StatusRow({
   security,
   apiKeys,
   hosts,
+  fullscreen,
 }: {
   mode: Mode;
   effort: Effort;
@@ -3587,6 +3726,7 @@ function StatusRow({
   security: 'warn' | 'block';
   apiKeys: string[];
   hosts: DetectedHost[];
+  fullscreen?: boolean;
 }): React.ReactElement {
   const Sep = (): React.ReactElement => <Text color="gray">{'     '}</Text>;
   // Local CLIs come first because they're "free" routes the user
@@ -3636,6 +3776,12 @@ function StatusRow({
       <Text bold color={labels.length > 0 ? 'green' : 'yellow'}>
         {labels.length > 0 ? labels.join(', ') : 'none'}
       </Text>
+      {fullscreen && (
+        <>
+          <Sep />
+          <Text bold color="magenta">fullscreen</Text>
+        </>
+      )}
     </Box>
   );
 }

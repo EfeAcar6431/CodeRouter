@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import React, { Fragment, useEffect, useMemo, useRef, useState } from 'react';
-import { Box, Static, Text, measureElement, render, useApp, useInput, useStdout } from 'ink';
+import { Box, Static, Text, measureElement, render, useApp, useInput, useStdin, useStdout } from 'ink';
 import type {
   ActivityEvent,
   AskUserQuestionPayload,
@@ -311,6 +311,7 @@ type AppProps = {
 function App({ cwd, initialMode, fullscreen: fullscreenInit }: AppProps): React.ReactElement {
   const { exit } = useApp();
   const { stdout } = useStdout();
+  const { stdin } = useStdin();
 
   // Fullscreen (alternate-screen) renderer: input is pinned in reserved
   // bottom rows and the transcript is an app-owned viewport, so output
@@ -342,12 +343,16 @@ function App({ cwd, initialMode, fullscreen: fullscreenInit }: AppProps): React.
   // Enter/leave the alternate screen buffer around fullscreen mode.
   // ESC[?1049h switches to the alt buffer (like vim/less); ESC[?1049l
   // restores the user's shell scrollback on exit or when toggling back
-  // to classic. Guard on a process-exit hook too so a crash restores it.
+  // to classic. The alt buffer disables the terminal's OWN scrollback,
+  // so we also turn on mouse reporting (?1000 button events + ?1006 SGR
+  // coordinates) and drive the viewport scroll from wheel events - the
+  // same trick Claude Code's fullscreen uses. Guard on a process-exit
+  // hook so a crash still restores the user's terminal.
   useEffect(() => {
     if (!fullscreen || !stdout) return;
-    stdout.write('\x1b[?1049h\x1b[H');
+    stdout.write('\x1b[?1049h\x1b[H\x1b[?1000h\x1b[?1006h');
     const restore = (): void => {
-      stdout.write('\x1b[?1049l');
+      stdout.write('\x1b[?1000l\x1b[?1006l\x1b[?1049l');
     };
     process.on('exit', restore);
     return () => {
@@ -355,6 +360,31 @@ function App({ cwd, initialMode, fullscreen: fullscreenInit }: AppProps): React.
       process.off('exit', restore);
     };
   }, [fullscreen, stdout]);
+
+  // Parse mouse-wheel events (SGR: ESC[<64;x;yM = wheel up, 65 = wheel
+  // down) and scroll the viewport. A second stdin 'data' listener runs
+  // alongside Ink's own keypress parser; Ink ignores these escape
+  // sequences so they don't leak into the input box.
+  useEffect(() => {
+    if (!fullscreen || !stdin) return;
+    const onData = (data: Buffer): void => {
+      const s = data.toString('utf8');
+      const re = /\x1b\[<(\d+);\d+;\d+[Mm]/g;
+      let delta = 0;
+      let m: RegExpExecArray | null = re.exec(s);
+      while (m !== null) {
+        const button = Number(m[1]);
+        if (button === 64) delta += 3;
+        else if (button === 65) delta -= 3;
+        m = re.exec(s);
+      }
+      if (delta !== 0) setScrollUp((v) => Math.max(0, v + delta));
+    };
+    stdin.on('data', onData);
+    return () => {
+      stdin.off('data', onData);
+    };
+  }, [fullscreen, stdin]);
 
   // Hydrate env from the credentials file once on mount. We do it inside
   // useState's initializer so the very first detectConfiguredProviders()
